@@ -1,5 +1,11 @@
 
 export type Role = 'user' | 'model';
+export type Gender = 'male' | 'female';
+
+export interface UserProfile {
+  name: string;
+  gender: Gender;
+}
 
 export interface Message {
   id: string;
