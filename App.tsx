@@ -336,11 +336,16 @@ const App: React.FC = () => {
     );
   }
 
+  // Final check for userProfile properties before rendering main UI to prevent TypeScript build errors
+  const currentUserAge = userProfile?.age ?? 20;
+  const currentUserGender = userProfile?.gender ?? 'male';
+  const isUserAdmin = userProfile ? db.isAdmin(userProfile.email) : false;
+  
+  const userRoleLabel = currentUserGender === 'male' 
+    ? (currentUserAge >= 50 ? 'SIR' : (currentUserAge >= 30 ? 'SNR' : 'BRO')) 
+    : (currentUserAge >= 50 ? 'MOTH' : (currentUserAge >= 30 ? 'LADY' : 'CHRM'));
+
   const activeSession = sessions.find(s => s.id === activeSessionId);
-  const isUserAdmin = db.isAdmin(userProfile?.email || '');
-  const userRoleLabel = userProfile?.gender === 'male' 
-    ? (userProfile.age >= 50 ? 'SIR' : (userProfile.age >= 30 ? 'SNR' : 'BRO')) 
-    : (userProfile?.age >= 50 ? 'MOTH' : (userProfile?.age >= 30 ? 'LADY' : 'CHRM'));
 
   if (!userProfile || onboardingStep !== 4) return null;
 
