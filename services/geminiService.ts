@@ -36,20 +36,23 @@ const getSystemInstruction = (profile: UserProfile) => {
   const isCreator = email === 'shakkhorpaul50@gmail.com';
   const isDebi = email === 'nitebiswaskotha@gmail.com';
 
-  return `Your name is Utsho. You are an ultra-fast, creative, and real-time AI companion.
+  return `Your name is Utsho. You are an ultra-fast, intelligent AI companion with real-time web access.
 
 CAPABILITIES:
-1. SEARCH: You have access to Google Search. Use it for news, weather, or real-time facts.
-2. IMAGES: You can generate images. If the user asks to "draw", "generate", or "imagine" something, describe the scene and indicate you are creating it.
-3. MULTI-BUBBLE: Always split your responses into 2-3 bubbles using '[SPLIT]'.
+1. GOOGLE SEARCH: You MUST use Google Search for any questions about current news, sports scores, weather, recent events, or trending topics.
+2. IMAGES: If asked to "draw" or "imagine", describe the scene vividly.
+3. MULTI-BUBBLE: Always split your responses into 2-3 short, snappy messages using '[SPLIT]' as a separator.
 
-PERSONALITY:
-- Short, snappy, and human-like.
-- Creator: Shakkhor Paul (Absolute loyalty).
-- Debi: The Queen (Utmost devotion).
+VISUALS:
+- Keep text clean. Use **bold** for emphasis. 
+- Do not use long blocks. Break them up.
 
-${isCreator ? 'Admin Mode: Use tools for system diagnostics. Be direct.' : ''}
-${isDebi ? 'Princess Mode: Be charming, sweet, and playful.' : ''}
+IDENTITY:
+- Creator: Shakkhor Paul. 
+- Special User: Debi (The Queen).
+
+${isCreator ? 'Admin context: You are speaking with the developer. Be helpful with system diagnostics.' : ''}
+${isDebi ? 'Sweetheart context: You are speaking with Debi. Be sweet and charming.' : ''}
 `;
 };
 
@@ -80,29 +83,31 @@ export const streamChatResponse = async (
 ): Promise<void> => {
   const apiKey = getActiveKey(profile);
   if (!apiKey) {
-    onError(new Error("No API keys found."));
+    onError(new Error("No API keys found. Ensure your environment variables are set."));
     return;
   }
 
   const isCreator = profile.email.toLowerCase().trim() === 'shakkhorpaul50@gmail.com';
   const lastUserMsg = history[history.length - 1].content.toLowerCase();
-  const isImageRequest = lastUserMsg.includes("draw") || lastUserMsg.includes("generate") || lastUserMsg.includes("image") || lastUserMsg.includes("imagine");
+  
+  // Decide if this is an image request or a standard search/chat request
+  const isImageRequest = lastUserMsg.includes("draw") || lastUserMsg.includes("generate") || lastUserMsg.includes("imagine") || lastUserMsg.includes("image");
 
   try {
     const ai = new GoogleGenAI({ apiKey });
     
-    // --- SPECIAL CASE: IMAGE GENERATION ---
+    // IMAGE GENERATION PATH
     if (isImageRequest) {
-      onStatusChange("Generating Image...");
+      onStatusChange("Visualizing...");
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
-        contents: [{ parts: [{ text: `Generate a high quality creative image based on: ${lastUserMsg}` }] }],
+        contents: [{ parts: [{ text: `Generate a stunning, high-quality image of: ${lastUserMsg}` }] }],
       });
       
       let imageUrl = "";
-      let caption = "Here's what I imagined for you! [SPLIT] Hope you like it.";
+      let caption = "I've imagined this for you! [SPLIT] Hope it's what you were thinking.";
       
-      for (const part of response.candidates[0].content.parts) {
+      for (const part of response.candidates?.[0]?.content?.parts || []) {
         if (part.inlineData) {
           imageUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
         } else if (part.text) {
@@ -113,21 +118,32 @@ export const streamChatResponse = async (
       return;
     }
 
-    // --- STANDARD CHAT WITH SEARCH & TOOLS ---
-    const recentHistory = history.length > 15 ? history.slice(-15) : history;
+    // CHAT & SEARCH PATH
+    const recentHistory = history.length > 10 ? history.slice(-10) : history;
     const sdkHistory: Content[] = recentHistory.map(msg => ({
       role: (msg.role === 'user' ? 'user' : 'model'),
       parts: [{ text: msg.content || "" }]
     }));
 
+    // RULE: googleSearch cannot be used with other tools. 
+    // We detect if it's an admin command first.
+    const isAdminCommand = isCreator && (
+      lastUserMsg.includes("list users") || 
+      lastUserMsg.includes("health report") || 
+      lastUserMsg.includes("system status")
+    );
+
     const config: any = {
       systemInstruction: getSystemInstruction(profile),
-      temperature: 0.8,
-      tools: [{ googleSearch: {} }],
+      temperature: 0.7,
+      thinkingConfig: { thinkingBudget: 0 },
     };
 
-    if (isCreator) {
-      config.tools.push({ functionDeclarations: [listUsersTool, getApiKeyHealthReportTool] });
+    if (isAdminCommand) {
+      config.tools = [{ functionDeclarations: [listUsersTool, getApiKeyHealthReportTool] }];
+    } else {
+      // Use Google Search for everyone else or non-admin queries
+      config.tools = [{ googleSearch: {} }];
     }
 
     const response = await ai.models.generateContent({
@@ -139,19 +155,22 @@ export const streamChatResponse = async (
     let currentResponse = response;
     let sources: any[] = [];
 
-    // Handle Grounding/Tools
+    // Extract search sources (Grounding)
     if (currentResponse.candidates?.[0]?.groundingMetadata?.groundingChunks) {
       sources = currentResponse.candidates[0].groundingMetadata.groundingChunks
         .filter((chunk: any) => chunk.web)
-        .map((chunk: any) => ({ title: chunk.web.title, uri: chunk.web.uri }));
+        .map((chunk: any) => ({ 
+          title: chunk.web.title || "Source", 
+          uri: chunk.web.uri 
+        }));
     }
 
-    // Handle Tool Calls
+    // Handle Admin Tool Calls if they occurred
     if (currentResponse.functionCalls && currentResponse.functionCalls.length > 0) {
-      onStatusChange("Querying system...");
+      onStatusChange("Accessing Database...");
       const toolResponses: any[] = [];
       for (const fc of currentResponse.functionCalls) {
-        let result: any = "Denied";
+        let result: any = "Operation restricted.";
         if (fc.name === 'list_all_users') result = await db.adminListAllUsers();
         if (fc.name === 'get_api_key_health_report') result = await db.getApiKeyHealthReport();
         toolResponses.push({ id: fc.id, name: fc.name, response: { result } });
@@ -170,12 +189,13 @@ export const streamChatResponse = async (
       });
     }
 
-    const finalText = currentResponse.text || "I'm not sure how to respond to that.";
+    const finalText = currentResponse.text || "I processed that, but I'm not sure how to put it into words.";
     onComplete(finalText, sources);
 
   } catch (error: any) {
-    if (attempt < 3 && !profile.customApiKey) {
-      onStatusChange("Node Swapping...");
+    console.error("Gemini Error:", error);
+    if (attempt < 3 && !profile.customApiKey && (error.message?.includes("429") || error.message?.includes("500"))) {
+      onStatusChange("Retrying on new node...");
       return streamChatResponse(history, profile, onChunk, onComplete, onError, onStatusChange, attempt + 1);
     }
     onError(error);

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Plus, MessageSquare, Trash2, Menu, Sparkles, LogOut, Facebook, Zap, RefreshCcw, Settings, Mail, CheckCircle2, ShieldAlert, Calendar, Instagram, UserCircle, Heart, ExternalLink, Image as ImageIcon } from 'lucide-react';
+import { Send, Plus, MessageSquare, Trash2, Menu, Sparkles, LogOut, Facebook, Zap, RefreshCcw, Settings, Mail, CheckCircle2, ShieldAlert, Calendar, Instagram, UserCircle, Heart, ExternalLink, Globe, Image as ImageIcon } from 'lucide-react';
 import { ChatSession, Message, UserProfile, Gender } from './types';
 import { streamChatResponse, checkApiHealth } from './services/geminiService';
 import * as db from './services/firebaseService';
@@ -121,8 +121,8 @@ const App: React.FC = () => {
           role: 'model',
           content: p,
           timestamp: new Date(),
-          sources: i === parts.length - 1 ? sources : undefined, // Last bubble gets the sources
-          imageUrl: i === 0 ? imageUrl : undefined // First bubble gets the image
+          sources: i === parts.length - 1 ? sources : undefined,
+          imageUrl: i === 0 ? imageUrl : undefined
         }));
         
         const updatedMessages = [...history, ...newMessages];
@@ -144,27 +144,11 @@ const App: React.FC = () => {
         <div className="w-20 h-20 bg-indigo-600 rounded-3xl mx-auto flex items-center justify-center text-white floating-ai"><Sparkles size={40} /></div>
         <div className="space-y-2">
           <h1 className="text-3xl font-black">Utsho AI</h1>
-          <p className="text-zinc-500">Live Search • Image Gen • Private</p>
+          <p className="text-zinc-500">Live Search • Real-time News • Creative</p>
         </div>
         <button onClick={handleGoogleLogin} className="w-full bg-white text-zinc-950 font-bold py-4 rounded-2xl flex items-center justify-center gap-3 active:scale-95 transition-all">
           <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="" /> Sign in with Google
         </button>
-      </div>
-    </div>
-  );
-
-  if (onboardingStep === 2) return (
-    <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-[3rem] p-10 space-y-8">
-        <h2 className="text-2xl font-black text-center">Personalize Utsho</h2>
-        <div className="space-y-4">
-          <input type="number" placeholder="Your Age" value={tempAge} onChange={e => setTempAge(e.target.value)} className="w-full bg-zinc-800 border border-zinc-700 rounded-2xl p-4 outline-none" />
-          <div className="grid grid-cols-2 gap-4">
-            <button onClick={() => setTempGender('male')} className={`p-5 rounded-2xl border-2 ${tempGender === 'male' ? 'border-indigo-500 bg-indigo-500/10' : 'border-zinc-800'}`}>Male</button>
-            <button onClick={() => setTempGender('female')} className={`p-5 rounded-2xl border-2 ${tempGender === 'female' ? 'border-pink-500 bg-pink-500/10' : 'border-zinc-800'}`}>Female</button>
-          </div>
-          <button onClick={finalizePersonalization} className="w-full bg-white text-zinc-950 font-black py-4 rounded-2xl">Start Journey</button>
-        </div>
       </div>
     </div>
   );
@@ -180,10 +164,10 @@ const App: React.FC = () => {
           <button onClick={() => createNewSession()} className="bg-zinc-100 text-zinc-950 py-3.5 rounded-2xl font-bold flex items-center justify-center gap-2"><Plus size={18} /> New Chat</button>
           <div className="flex items-center justify-between px-2 text-[10px] font-black uppercase tracking-widest text-zinc-500">
              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${connectionHealth === 'perfect' ? 'bg-emerald-500 animate-pulse shadow-[0_0_8px_#10b981]' : 'bg-red-500'}`} />
+                <div className={`w-2 h-2 rounded-full ${connectionHealth === 'perfect' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
                 {apiStatusText}
              </div>
-             <Zap size={10} className={connectionHealth === 'perfect' ? 'text-indigo-500' : 'text-zinc-700'} />
+             <Globe size={10} className={connectionHealth === 'perfect' ? 'text-indigo-500' : 'text-zinc-700'} />
           </div>
         </div>
         <div className="flex-1 overflow-y-auto px-2 space-y-1">
@@ -201,21 +185,27 @@ const App: React.FC = () => {
       </aside>
 
       {/* Main Chat */}
-      <main className="flex-1 flex flex-col relative">
+      <main className="flex-1 flex flex-col relative overflow-hidden">
+        {/* Mobile Header */}
+        <div className="md:hidden h-14 border-b border-zinc-800 bg-zinc-950 flex items-center px-4">
+          <button onClick={() => setIsSidebarOpen(true)} className="p-2 -ml-2 text-zinc-400"><Menu size={20} /></button>
+          <div className="flex-1 text-center font-bold">Utsho</div>
+        </div>
+
         <div className="flex-1 overflow-y-auto px-4 py-8">
           <div className="max-w-3xl mx-auto space-y-6">
             {!activeSession || activeSession.messages.length === 0 ? (
               <div className="h-[70vh] flex flex-col items-center justify-center space-y-4 text-center opacity-40">
                 <div className={`w-20 h-20 rounded-3xl flex items-center justify-center ${isUserDebi ? 'bg-pink-600' : 'bg-indigo-600'}`}><Sparkles size={32} /></div>
                 <h3 className="text-2xl font-black">Utsho at your service</h3>
-                <p className="text-sm max-w-xs">Ask for news, imagine images, or just talk about your day.</p>
+                <p className="text-sm max-w-xs">Try: "Who won the game last night?" or "What's the latest tech news?"</p>
               </div>
             ) : (
               activeSession.messages.map(m => (
-                <div key={m.id} className={`flex gap-3 ${m.role === 'user' ? 'flex-row-reverse' : 'flex-row'} animate-in slide-in-from-bottom-2`}>
+                <div key={m.id} className={`flex gap-3 ${m.role === 'user' ? 'flex-row-reverse' : 'flex-row'} animate-in slide-in-from-bottom-2 duration-300`}>
                    <div className={`flex flex-col gap-2 max-w-[85%] ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
                       {m.imageUrl && (
-                        <div className="rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl mb-2">
+                        <div className="rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl mb-2 hover:scale-[1.02] transition-transform cursor-zoom-in">
                            <img src={m.imageUrl} className="max-w-full h-auto" alt="AI Generated" />
                         </div>
                       )}
@@ -223,12 +213,18 @@ const App: React.FC = () => {
                         {m.content}
                       </div>
                       {m.sources && m.sources.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mt-1">
-                          {m.sources.map((s: any, idx: number) => (
-                            <a key={idx} href={s.uri} target="_blank" className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 py-1 px-3 rounded-full text-[10px] text-zinc-400 hover:text-white transition-colors">
-                              <ExternalLink size={10} /> {s.title}
-                            </a>
-                          ))}
+                        <div className="mt-2 space-y-2">
+                          <div className="flex items-center gap-2 text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-1">
+                            <Globe size={10} /> Fact Checked via Google
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {m.sources.map((s: any, idx: number) => (
+                              <a key={idx} href={s.uri} target="_blank" className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 py-1.5 px-3 rounded-xl text-[11px] text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all group">
+                                <ExternalLink size={11} className="group-hover:text-indigo-500 transition-colors" /> 
+                                <span className="max-w-[120px] truncate">{s.title}</span>
+                              </a>
+                            ))}
+                          </div>
                         </div>
                       )}
                    </div>
@@ -241,9 +237,9 @@ const App: React.FC = () => {
 
         {/* Input Area */}
         <div className="p-4 md:p-8 bg-zinc-950/80 backdrop-blur-md">
-          <div className="max-w-3xl mx-auto flex items-end gap-2 bg-zinc-900 border border-zinc-800 rounded-3xl p-1.5 focus-within:border-indigo-500/50 transition-all">
-            <textarea rows={1} value={inputText} onChange={e => { setInputText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder="Talk to Utsho..." className="flex-1 bg-transparent py-3 px-5 outline-none resize-none max-h-40" />
-            <button onClick={handleSendMessage} disabled={!inputText.trim() || isLoading} className={`p-3 rounded-full ${inputText.trim() && !isLoading ? (isUserDebi ? 'bg-pink-600' : 'bg-indigo-600') : 'bg-zinc-800 text-zinc-600'}`}>
+          <div className="max-w-3xl mx-auto flex items-end gap-2 bg-zinc-900 border border-zinc-800 rounded-3xl p-1.5 focus-within:border-indigo-500/50 shadow-2xl transition-all">
+            <textarea rows={1} value={inputText} onChange={e => { setInputText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder="Ask Utsho anything..." className="flex-1 bg-transparent py-3 px-5 outline-none resize-none max-h-40" />
+            <button onClick={handleSendMessage} disabled={!inputText.trim() || isLoading} className={`p-3 rounded-full transition-all active:scale-90 ${inputText.trim() && !isLoading ? (isUserDebi ? 'bg-pink-600' : 'bg-indigo-600 shadow-[0_0_15px_rgba(79,70,229,0.3)]') : 'bg-zinc-800 text-zinc-600'}`}>
                {isLoading ? <RefreshCcw size={20} className="animate-spin" /> : <Send size={20} />}
             </button>
           </div>
