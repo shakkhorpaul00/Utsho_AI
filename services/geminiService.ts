@@ -162,9 +162,13 @@ export const streamChatResponse = async (
         if (fc.name === 'get_api_key_health_report') result = await db.getApiKeyHealthReport();
         toolResponses.push({ id: fc.id, name: fc.name, response: { result } });
       }
-      sdkHistory.push(currentResponse.candidates![0].content);
-      sdkHistory.push({ role: 'user', parts: toolResponses.map(tr => ({ functionResponse: tr })) });
-      currentResponse = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: sdkHistory, config: config });
+      
+      const modelContent = currentResponse.candidates?.[0]?.content;
+      if (modelContent) {
+        sdkHistory.push(modelContent);
+        sdkHistory.push({ role: 'user', parts: toolResponses.map(tr => ({ functionResponse: tr })) });
+        currentResponse = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: sdkHistory, config: config });
+      }
     }
 
     onComplete(currentResponse.text || "...", sources);
