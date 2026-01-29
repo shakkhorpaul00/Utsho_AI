@@ -61,7 +61,7 @@ const App: React.FC = () => {
     const interval = setInterval(() => {
       setPoolInfo(getPoolStatus());
       setLastErrorDiagnostic(getLastNodeError());
-    }, 5000);
+    }, 4000);
     return () => clearInterval(interval);
   }, []);
 
@@ -95,10 +95,10 @@ const App: React.FC = () => {
   };
 
   const performHealthCheck = async (profile?: UserProfile) => {
-    setApiStatusText('Scanning Nodes...');
+    setApiStatusText('Scanning...');
     const { healthy, error } = await checkApiHealth(profile || userProfile || undefined);
     setConnectionHealth(healthy ? 'perfect' : 'error');
-    setApiStatusText(healthy ? 'Active' : 'Node Error');
+    setApiStatusText(healthy ? 'Active' : 'Sync Error');
     setPoolInfo(getPoolStatus());
     if (error) setLastErrorDiagnostic(error);
   };
@@ -185,12 +185,12 @@ const App: React.FC = () => {
       },
       (err) => {
         setIsLoading(false);
-        const errMsg = err.message || "Unknown Error";
+        const errMsg = err.message || "Connection Error";
         setLastErrorDiagnostic(errMsg);
         
-        let errorContent = errMsg;
-        if (errMsg.includes("429") || errMsg.includes("Exhausted") || errMsg.includes("Swap")) {
-          errorContent = "Pool Failure: Every node in the pool returned an error. This usually means the keys provided are invalid or the model is not enabled for those keys. Check the Diagnostics in your sidebar.";
+        let errorContent = `Pool Failure: ${errMsg}.`;
+        if (errMsg.includes("limit: 0")) {
+          errorContent = "Critical: Google has restricted these API keys (Limit 0). This usually resolves after 1-2 hours for new keys, or if the Generative Language API is manually enabled in the Cloud Console.";
         }
         
         const errorMsg: Message = { id: crypto.randomUUID(), role: 'model', content: errorContent, timestamp: new Date() };
@@ -270,7 +270,7 @@ const App: React.FC = () => {
                     <span>Last Pool Error</span>
                     {lastErrorDiagnostic !== "None" && <AlertCircle size={8} className="text-red-500" />}
                   </div>
-                  <div className={`text-[9px] font-mono leading-tight break-all ${lastErrorDiagnostic === 'None' ? 'text-zinc-700' : 'text-red-400/80'}`}>
+                  <div className={`text-[9px] font-mono leading-tight break-words max-h-24 overflow-y-auto ${lastErrorDiagnostic === 'None' ? 'text-zinc-700' : 'text-red-400/80'}`}>
                     {lastErrorDiagnostic}
                   </div>
                </div>
@@ -291,7 +291,7 @@ const App: React.FC = () => {
              <div className="flex items-center justify-between px-3 py-2 bg-zinc-800/30 rounded-xl border border-zinc-800/50">
                <div className="flex items-center gap-2">
                   <div className={`w-2 h-2 rounded-full ${connectionHealth === 'perfect' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">{apiStatusText === 'Ready' || apiStatusText === 'Active' ? 'System Stable' : 'Syncing...'}</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">System Stable</span>
                </div>
                <button onClick={() => setIsSettingsOpen(true)} className="text-zinc-700 hover:text-indigo-400 transition-colors"><Settings size={14} /></button>
              </div>
@@ -330,7 +330,7 @@ const App: React.FC = () => {
                 <div className={`w-24 h-24 rounded-[2rem] flex items-center justify-center shadow-2xl floating-ai ${isUserDebi ? 'bg-pink-600 shadow-pink-500/20' : 'bg-indigo-600 shadow-indigo-500/20'}`}><Sparkles size={40} /></div>
                 <div className="space-y-2">
                   <h3 className="text-3xl font-black tracking-tight">Ready to chat?</h3>
-                  {isAdmin && <p className="text-sm max-w-xs text-zinc-500 mx-auto">Admin Access: {poolInfo.total} nodes pooled. If nodes are exhausted, check the Diagnostics log in Sidebar.</p>}
+                  {isAdmin && <p className="text-sm max-w-xs text-zinc-500 mx-auto">Admin Access: {poolInfo.total} nodes pooled. Truncated logs in Sidebar.</p>}
                   {!isAdmin && <p className="text-sm max-w-xs text-zinc-500 mx-auto">I'm your intelligent AI companion with vision and search capabilities.</p>}
                 </div>
                 <div className="grid grid-cols-2 gap-3 w-full max-w-sm">

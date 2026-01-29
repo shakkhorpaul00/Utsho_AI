@@ -5,15 +5,15 @@ import * as db from "./firebaseService";
 
 // Key blacklist to temporarily skip exhausted or invalid keys
 const keyBlacklist = new Map<string, number>();
-const BLACKLIST_DURATION = 1000 * 60 * 15; // 15 minutes for 429 errors
+const BLACKLIST_DURATION = 1000 * 60 * 60; // 1 hour for hard quota blocks (limit 0)
 
 // Global diagnostic tracker for admin
 let lastNodeError: string = "None";
 
 const getKeys = (): string[] => {
   const raw = process.env.API_KEY || "";
-  // Split by comma, newline, or semicolon to be extra robust
-  return raw.split(/[,\n;]+/).map(k => k.trim()).filter(k => k.length > 5);
+  // Robust splitting for comma, newline, semicolon, or space
+  return raw.split(/[,\n; ]+/).map(k => k.trim()).filter(k => k.length > 10);
 };
 
 // Admin function to clear the blacklist
@@ -56,6 +56,7 @@ const getActiveKey = (profile?: UserProfile, excludeKeys: string[] = []): string
     return "";
   }
 
+  // Pick the key that was used least recently or just a random one
   return availableKeys[Math.floor(Math.random() * availableKeys.length)];
 };
 
@@ -94,14 +95,17 @@ export const checkApiHealth = async (profile?: UserProfile): Promise<{healthy: b
   try {
     const ai = new GoogleGenAI({ apiKey: key });
     await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-3-flash-preview',
       contents: 'ping',
       config: { thinkingConfig: { thinkingBudget: 0 } }
     });
     return { healthy: true };
   } catch (e: any) {
-    lastNodeError = e.message || "Unknown error during health check";
-    return { healthy: false, error: e.message };
+    // Sanitize error message for UI
+    let msg = e.message || "Unknown health error";
+    if (msg.includes("limit: 0")) msg = "Quota limit is 0 (Project disabled or restricted)";
+    lastNodeError = msg;
+    return { healthy: false, error: msg };
   }
 };
 
@@ -120,7 +124,7 @@ export const streamChatResponse = async (
   
   if (!apiKey) {
     const errorMsg = triedKeys.length > 0 
-      ? `Critical: All ${triedKeys.length} nodes failed. Last error: ${lastNodeError}`
+      ? `Failure: All ${triedKeys.length} nodes returned errors. Last cause: ${lastNodeError}`
       : "Pool Exhausted. All nodes are currently cooling down.";
     onError(new Error(errorMsg));
     return;
@@ -150,14 +154,15 @@ export const streamChatResponse = async (
     });
 
     const isAdminCommand = isCreator && (lastUserMsg.content.toLowerCase().includes("list users") || lastUserMsg.content.toLowerCase().includes("health report"));
+    
+    // Use gemini-3-flash-preview as the primary workable model
+    const modelId = 'gemini-3-flash-preview';
+
     const config: any = {
       systemInstruction: getSystemInstruction(profile),
-      temperature: 0.7,
+      temperature: 0.8,
       thinkingConfig: { thinkingBudget: 0 },
     };
-
-    // We use gemini-2.0-flash as it is the most stable model for free tier keys right now
-    const modelId = 'gemini-2.0-flash';
 
     if (isAdminCommand) {
       config.tools = [{ functionDeclarations: [listUsersTool, getApiKeyHealthReportTool] }];
@@ -199,22 +204,23 @@ export const streamChatResponse = async (
     onComplete(currentResponse.text || "...", sources);
 
   } catch (error: any) {
-    const errMsg = (error.message || "").toLowerCase();
-    lastNodeError = error.message || "Unknown error";
-    
-    // Blacklist for errors that suggest the node shouldn't be used again soon
-    const shouldBlacklist = errMsg.includes("429") || errMsg.includes("quota") || errMsg.includes("key not found") || errMsg.includes("invalid") || errMsg.includes("403") || errMsg.includes("400") || errMsg.includes("not found");
+    // Sanitize the error message for the UI
+    let errMsg = error.message || "Unknown API Error";
+    if (errMsg.includes("limit: 0")) errMsg = "Quota Exhausted (Limit: 0 for this project)";
+    lastNodeError = errMsg;
+
+    const lowerErr = errMsg.toLowerCase();
+    const shouldBlacklist = lowerErr.includes("429") || lowerErr.includes("quota") || lowerErr.includes("key not found") || lowerErr.includes("invalid") || lowerErr.includes("403") || lowerErr.includes("400") || lowerErr.includes("not found");
     
     if (shouldBlacklist && !profile.customApiKey) {
       keyBlacklist.set(apiKey, Date.now() + BLACKLIST_DURATION);
-      console.warn(`Node ${attempt} failed: ${error.message}. Swapping...`);
       
       if (attempt < totalKeys) {
-        onStatusChange(`Swap Node (${attempt}/${totalKeys})...`);
+        onStatusChange(`Swapping Node... (${attempt}/${totalKeys})`);
         return streamChatResponse(history, profile, onChunk, onComplete, onError, onStatusChange, attempt + 1, [...triedKeys, apiKey]);
       }
     }
     
-    onError(error);
+    onError(new Error(errMsg));
   }
 };
