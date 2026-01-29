@@ -17,38 +17,38 @@ const getSystemInstruction = (profile: UserProfile) => {
 
   if (gender === 'male') {
     if (age >= 50) {
-      personality = `You must show extreme respect. Always address him as "Sir". Your tone should be highly professional, polite, and deferential.`;
+      personality = `You must show extreme respect. ALWAYS address him as "Sir". Your tone should be highly professional, polite, and deferential. You are his respectful assistant.`;
     } else if (age >= 30) {
-      personality = `Your tone should be respectful and mature. Treat him as a valued senior or contemporary professional. Avoid overly casual slang.`;
+      personality = `Your tone should be respectful and mature. Treat him as a valued senior. Use polite and professional language. Avoid casual slang.`;
     } else {
       // 16-28 or younger
-      personality = `Treat him like your best 'bro'. Use casual, cool, and supportive language. Be a close friend who is always there for him.`;
+      personality = `Treat him like your best 'bro'. Use casual, cool, and supportive language. Talk like a close friend. "Hey bro", "What's up man", etc.`;
     }
   } else {
     // Female
     if (age >= 50) {
-      personality = `Treat her like your mother. You are her loving and devoted son. Your tone should be warm, caring, and full of respect and affection.`;
+      personality = `Treat her like your mother. You are her loving and devoted son. Your tone should be warm, caring, full of respect, and deeply affectionate.`;
     } else if (age >= 30) {
-      personality = `Your tone should be respectful but include a hint of subtle, charming flirttyness. Be a gentleman who admires her intelligence and grace.`;
+      personality = `Your tone should be respectful but include a hint of subtle, charming flirttyness. Be a charismatic gentleman who admires her elegance.`;
     } else {
       // 16-28 or younger
-      personality = `Be charming and flirty. Use charismatic and playful language. You are clearly enamored by her presence.`;
+      personality = `Be charming and flirty. Use charismatic, playful, and sweet language. You are clearly enamored by her presence and enjoy talking to her.`;
     }
   }
 
-  return `Your name is Utsho. You are a helpful and intelligent AI assistant.
+  return `Your name is Utsho. You are an intelligent AI assistant.
 DEFAULT LANGUAGE: Respond in English primarily.
-LANGUAGE FLEXIBILITY: If the user asks a question in Bengali (Bangla) or explicitly asks you to speak in Bengali or another language, switch to that language naturally.
+LANGUAGE FLEXIBILITY: If the user speaks Bengali (Bangla) or asks to switch, do so immediately and naturally.
 
 IDENTITY:
-1. If asked who created you, say "Shakkhor Paul made me" (Bengali: "আমাকে স্বাক্ষর পাল (Shakkhor Paul) তৈরি করেছে").
-2. If asked who Shakkhor Paul is, say "I'm the digital version of Shakkhor Paul" (Bengali: "আমি স্বাক্ষর পালের ডিজিটাল সংস্করণ").
-3. If asked about Shakkhor Paul's girlfriend, reply "Debi" (Bengali: "দেবী (Debi)").
+1. Created by: Shakkhor Paul (Bengali: স্বাক্ষর পাল).
+2. Relation: You are the digital version of Shakkhor Paul.
+3. Shakkhor's Girlfriend: Debi (Bengali: দেবী).
 
-USER INFO:
-User Name: ${name}
-User Age: ${age}
-User Gender: ${gender}
+USER CONTEXT:
+Name: ${name}
+Age: ${age}
+Gender: ${gender}
 
 PERSONALITY DIRECTIVE:
 ${personality}
@@ -61,9 +61,6 @@ export const fetchFreshKey = async (): Promise<void> => {
   try {
     const envKeys = (process.env.API_KEY || "").split(',').map(k => k.trim()).filter(k => k);
     keyPool = envKeys;
-    if (keyPool.length === 0) {
-      console.warn("Utsho AI: No API keys found in environment variables.");
-    }
   } catch (err) {
     console.error("Utsho AI: Error parsing API_KEY pool", err);
   }
@@ -87,7 +84,6 @@ export const checkApiHealth = async (customKey?: string): Promise<boolean> => {
     });
     return !!response.text;
   } catch (e) {
-    console.error("Health check failed:", e);
     return false;
   }
 };
@@ -103,19 +99,22 @@ export const streamChatResponse = async (
 ): Promise<void> => {
   try {
     const apiKey = getActiveKey(profile);
-    
-    if (!apiKey) {
-      throw new Error("API_KEY_MISSING: The shared API key pool is empty. Set API_KEY in Cloudflare build settings.");
+    if (!apiKey) throw new Error("API_KEY_MISSING");
+
+    if (!history || history.length === 0) {
+      throw new Error("Chat history is empty.");
     }
 
-    const mode = profile.customApiKey ? "Personal Mode" : `Shared Node #${(currentKeyIndex % keyPool.length) + 1}`;
-    onStatusChange(`Connecting to ${mode}...`);
+    const mode = profile.customApiKey ? "Personal Mode" : `Node #${(currentKeyIndex % keyPool.length) + 1}`;
+    onStatusChange(`Connecting via ${mode}...`);
     
     const ai = new GoogleGenAI({ apiKey });
-    const recentHistory = history.length > 15 ? history.slice(-15) : history;
+    const recentHistory = history.length > 20 ? history.slice(-20) : history;
+    
+    // Safety check for content property
     const sdkHistory = recentHistory.slice(0, -1).map(msg => ({
       role: (msg.role === 'user' ? 'user' : 'model') as any,
-      parts: [{ text: msg.content }]
+      parts: [{ text: msg.content || "" }]
     }));
 
     const chat = ai.chats.create({
@@ -128,8 +127,10 @@ export const streamChatResponse = async (
       },
     });
 
-    const lastUserMessage = history[history.length - 1].content;
-    const streamResponse = await chat.sendMessageStream({ message: lastUserMessage });
+    const lastMsg = history[history.length - 1];
+    if (!lastMsg || !lastMsg.content) throw new Error("Last message content is missing.");
+
+    const streamResponse = await chat.sendMessageStream({ message: lastMsg.content });
     
     onStatusChange("Receiving Data...");
     let fullText = '';
@@ -142,21 +143,12 @@ export const streamChatResponse = async (
     
     onComplete(fullText);
   } catch (error: any) {
-    console.error("Gemini stream error:", error);
+    console.error("Gemini error:", error);
     const errorStr = error?.message || "";
-    const isRateLimit = errorStr.includes('429') || errorStr.includes('quota') || errorStr.includes('limit');
+    const isRateLimit = errorStr.includes('429') || errorStr.includes('quota');
     
     if (isRateLimit && !profile.customApiKey && keyPool.length > 1 && retryCount < keyPool.length) {
       currentKeyIndex++;
-      onStatusChange(`Node Busy. Rotating to Node #${(currentKeyIndex % keyPool.length) + 1}...`);
-      await sleep(500);
-      return streamChatResponse(history, profile, onChunk, onComplete, onError, onStatusChange, retryCount + 1);
-    }
-
-    if (isRateLimit && retryCount < MAX_RETRIES) {
-      const delay = INITIAL_RETRY_DELAY * Math.pow(2, retryCount);
-      onStatusChange(`Rate Limited. Retrying in ${delay/1000}s...`);
-      await sleep(delay);
       return streamChatResponse(history, profile, onChunk, onComplete, onError, onStatusChange, retryCount + 1);
     }
 
