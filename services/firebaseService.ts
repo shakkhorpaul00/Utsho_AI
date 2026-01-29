@@ -10,7 +10,6 @@ import {
   query, 
   orderBy, 
   deleteDoc,
-  updateDoc,
   increment,
   Timestamp,
   Firestore
@@ -65,8 +64,8 @@ export const loginWithGoogle = async (): Promise<UserProfile | null> => {
       name: user.displayName || 'User',
       email: user.email,
       picture: user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName}&background=4f46e5&color=fff`,
-      gender: 'male', // Default, will be updated in onboarding
-      age: 0,        // Default, will be updated in onboarding
+      gender: 'male', 
+      age: 0,        
       googleId: user.uid
     };
   }
@@ -120,41 +119,57 @@ export const adminListAllUsers = async (): Promise<any[]> => {
   return querySnapshot.docs.map(doc => ({ email: doc.id, ...doc.data() }));
 };
 
+/**
+ * Sanitizes messages for Firestore:
+ * 1. Removes heavy base64 strings (imagePart and imageUrl containing data:).
+ * 2. Removes undefined keys which Firestore rejects.
+ * 3. Converts Dates to Firestore Timestamps.
+ */
 const sanitizeMessages = (messages: Message[]) => {
   return messages.map(m => {
-    // Completely remove huge binary data before saving to cloud
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { imagePart, imageUrl, ...rest } = m; 
+    const { imagePart, imageUrl, timestamp, ...rest } = m; 
     
-    // Only keep imageUrl if it's a real HTTP URL, not a base64 data: string
-    const cleanedImageUrl = (m.imageUrl && m.imageUrl.startsWith('http')) ? m.imageUrl : undefined;
+    // Only keep imageUrl if it's a real HTTP URL (e.g. from a generated image if applicable)
+    const cleanedImageUrl = (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null;
 
-    return {
+    const sanitized: any = {
       ...rest,
       imageUrl: cleanedImageUrl,
-      timestamp: Timestamp.fromDate(new Date(m.timestamp))
+      timestamp: Timestamp.fromDate(new Date(timestamp))
     };
+
+    // Remove any undefined properties
+    Object.keys(sanitized).forEach(key => sanitized[key] === undefined && delete sanitized[key]);
+
+    return sanitized;
   });
 };
 
 export const saveSession = async (email: string, session: ChatSession) => {
   if (!db) return;
   const sessionRef = doc(db, 'users', email, 'sessions', session.id);
-  await setDoc(sessionRef, {
+  const payload = {
     id: session.id,
     title: session.title,
     createdAt: Timestamp.fromDate(new Date(session.createdAt)),
     messages: sanitizeMessages(session.messages)
-  });
+  };
+  await setDoc(sessionRef, payload);
 };
 
-export const updateSessionMessages = async (email: string, sessionId: string, messages: Message[]) => {
+export const updateSessionMessages = async (email: string, sessionId: string, messages: Message[], title?: string) => {
   if (!db) return;
   const sessionRef = doc(db, 'users', email, 'sessions', sessionId);
+  const payload: any = {
+    messages: sanitizeMessages(messages)
+  };
+  if (title) payload.title = title;
+
   try {
-    await setDoc(sessionRef, { messages: sanitizeMessages(messages) }, { merge: true });
+    await setDoc(sessionRef, payload, { merge: true });
   } catch (e) {
-    console.error("Firestore Save Error:", e);
+    console.error("Firestore Save Error for session:", sessionId, e);
     throw e;
   }
 };
@@ -169,7 +184,10 @@ export const getSessions = async (email: string): Promise<ChatSession[]> => {
     return {
       ...data,
       createdAt: (data.createdAt as Timestamp).toDate(),
-      messages: (data.messages as any[]).map(m => ({ ...m, timestamp: (m.timestamp as Timestamp).toDate() }))
+      messages: (data.messages as any[] || []).map(m => ({
+        ...m,
+        timestamp: m.timestamp instanceof Timestamp ? m.timestamp.toDate() : new Date(m.timestamp)
+      }))
     } as ChatSession;
   });
 };

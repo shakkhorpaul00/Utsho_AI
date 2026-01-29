@@ -57,7 +57,9 @@ const App: React.FC = () => {
             const cloudSessions = await db.getSessions(localProfile.email);
             setSessions(cloudSessions);
             if (cloudSessions.length > 0) setActiveSessionId(cloudSessions[0].id);
-          } catch (e) {}
+          } catch (e) {
+            console.error("Cloud boot error:", e);
+          }
         }
         await performHealthCheck(localProfile);
       }
@@ -158,15 +160,17 @@ const App: React.FC = () => {
     
     const currentSession = sessions.find(s => s.id === activeSessionId)!;
     const history = [...currentSession.messages, userMsg];
+    const isFirstMessage = currentSession.messages.length === 0;
+    const newTitle = isFirstMessage ? (userMsg.content.slice(0, 30) || "Image Analysis") : currentSession.title;
     
     setInputText('');
     setSelectedImage(null);
     setImagePreview(null);
     setIsLoading(true);
-    setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, messages: history } : s));
+    setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, messages: history, title: newTitle } : s));
 
     if (db.isDatabaseEnabled()) {
-      db.updateSessionMessages(userProfile.email, activeSessionId, history).catch(console.error);
+      db.updateSessionMessages(userProfile.email, activeSessionId, history, newTitle).catch(err => console.error("Initial save error:", err));
     }
 
     await streamChatResponse(
@@ -186,11 +190,10 @@ const App: React.FC = () => {
         }));
         
         const updatedMessages = [...history, ...newMessages];
-        const newTitle = currentSession.messages.length === 0 ? userMsg.content.slice(0, 30) || "Image Analysis" : currentSession.title;
-        setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, messages: updatedMessages, title: newTitle } : s));
+        setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, messages: updatedMessages } : s));
         
         if (db.isDatabaseEnabled()) {
-          db.updateSessionMessages(userProfile.email, activeSessionId, updatedMessages).catch(console.error);
+          db.updateSessionMessages(userProfile.email, activeSessionId, updatedMessages, newTitle).catch(err => console.error("Response save error:", err));
         }
         setPoolInfo(getPoolStatus());
       },
@@ -201,7 +204,7 @@ const App: React.FC = () => {
         const errorMsg: Message = { id: crypto.randomUUID(), role: 'model', content: `Failure: ${errMsg}`, timestamp: new Date() };
         const finalMessages = [...history, errorMsg];
         setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, messages: finalMessages } : s));
-        if (db.isDatabaseEnabled()) db.updateSessionMessages(userProfile.email, activeSessionId, finalMessages).catch(console.error);
+        if (db.isDatabaseEnabled()) db.updateSessionMessages(userProfile.email, activeSessionId, finalMessages, newTitle).catch(console.error);
       },
       (status) => setApiStatusText(status)
     );
