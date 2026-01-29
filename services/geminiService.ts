@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, GenerateContentResponse, Type, FunctionDeclaration } from "@google/genai";
+import { GoogleGenAI, GenerateContentResponse, Type, FunctionDeclaration, Content } from "@google/genai";
 import { Message, UserProfile } from "../types";
 import * as db from "./firebaseService";
 
@@ -9,22 +9,17 @@ const getKeys = (): string[] => {
   return raw.split(',').map(k => k.trim()).filter(k => k.length > 0);
 };
 
-let currentKeyIndex = 0;
-
+// Returns a random key from the shared pool, or the user's custom key if provided.
 const getActiveKey = (profile?: UserProfile): string => {
   if (profile?.customApiKey && profile.customApiKey.trim().length > 5) {
     return profile.customApiKey.trim();
   }
   const keys = getKeys();
   if (keys.length === 0) return "";
-  return keys[currentKeyIndex % keys.length];
-};
-
-const rotateKey = (): boolean => {
-  const keys = getKeys();
-  if (keys.length <= 1) return false;
-  currentKeyIndex = (currentKeyIndex + 1) % keys.length;
-  return true;
+  
+  // Randomly select a key to distribute the load and avoid hitting rate limits/expiration on one key
+  const randomIndex = Math.floor(Math.random() * keys.length);
+  return keys[randomIndex];
 };
 
 // Administrative Tool Declarations
@@ -131,7 +126,7 @@ export const checkApiHealth = async (profile?: UserProfile): Promise<boolean> =>
     });
     if (response.text) return true;
   } catch (e) {
-    if (!profile?.customApiKey) rotateKey();
+    // Health check failed; log will use another key next time due to random selection
   }
   return false;
 };
@@ -156,7 +151,9 @@ export const streamChatResponse = async (
   try {
     const ai = new GoogleGenAI({ apiKey });
     const recentHistory = history.length > 20 ? history.slice(-20) : history;
-    const sdkHistory = recentHistory.slice(0, -1).map(msg => ({
+    
+    // Explicitly type history items to match the SDK's Content type
+    const sdkHistory: Content[] = recentHistory.slice(0, -1).map(msg => ({
       role: (msg.role === 'user' ? 'user' : 'model'),
       parts: [{ text: msg.content || "" }]
     }));
@@ -172,17 +169,21 @@ export const streamChatResponse = async (
     }
 
     const lastMsg = history[history.length - 1];
+    const conversationTurns: Content[] = [
+      ...sdkHistory, 
+      { role: 'user', parts: [{ text: lastMsg.content }] }
+    ];
     
-    // Admin turn might involve multiple function calls
+    // First interaction
     let response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: [...sdkHistory, { role: 'user', parts: [{ text: lastMsg.content }] }],
+      contents: conversationTurns,
       config: config
     });
 
     let currentResponse = response;
-    const conversationTurns: any[] = [...sdkHistory, { role: 'user', parts: [{ text: lastMsg.content }] }];
 
+    // Loop through tool calls (common pattern for tool-capable models)
     while (currentResponse.functionCalls && currentResponse.functionCalls.length > 0) {
       onStatusChange("Querying database...");
       const toolResponses: any[] = [];
@@ -192,7 +193,8 @@ export const streamChatResponse = async (
         if (fc.name === 'list_all_users') {
           result = await db.adminListAllUsers();
         } else if (fc.name === 'get_user_details') {
-          result = await db.getUserProfile((fc.args as any).email);
+          const args = fc.args as { email: string };
+          result = await db.getUserProfile(args.email);
         }
         
         toolResponses.push({
@@ -202,16 +204,17 @@ export const streamChatResponse = async (
         });
       }
 
-      // Add the model's function call turn and the user's function response turn
+      // Safeguard against missing candidates
       const modelContent = currentResponse.candidates?.[0]?.content;
       if (modelContent) {
         conversationTurns.push(modelContent);
+        // User turn provides the function result
         conversationTurns.push({
           role: 'user',
           parts: toolResponses.map(tr => ({ functionResponse: tr }))
         });
       } else {
-        break; // Safety break if content is missing
+        break; 
       }
 
       currentResponse = await ai.models.generateContent({
@@ -230,15 +233,15 @@ export const streamChatResponse = async (
     const isAuthError = errorMessage.includes("API key not valid") || errorMessage.includes("401") || errorMessage.includes("INVALID_ARGUMENT");
     const isQuotaError = errorMessage.includes("429") || errorMessage.includes("quota");
 
+    // Retry with a different key if shared pool is used
     if (!profile.customApiKey && (isAuthError || isQuotaError) && attempt < getKeys().length) {
-      onStatusChange(`Rotating node... (${attempt + 1})`);
-      rotateKey();
+      onStatusChange(`Load balancing... (Node ${attempt + 1})`);
       return streamChatResponse(history, profile, onChunk, onComplete, onError, onStatusChange, attempt + 1);
     }
     
     let userFriendlyError = "I'm having trouble connecting right now.";
-    if (isAuthError) userFriendlyError = profile.customApiKey ? "Your personal API key is invalid." : "System key invalid.";
-    if (isQuotaError) userFriendlyError = "Rate Limit reached. Please wait.";
+    if (isAuthError) userFriendlyError = profile.customApiKey ? "Your personal API key is invalid." : "System node busy or invalid key.";
+    if (isQuotaError) userFriendlyError = "High traffic detected. Please retry in a moment.";
     
     onError({ ...error, message: userFriendlyError });
   }
