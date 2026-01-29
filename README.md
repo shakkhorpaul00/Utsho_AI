@@ -2,15 +2,22 @@
 # Utsho AI - Deployment Guide
 
 ## 1. Firebase Setup (Cloud Database)
-1. Go to [Firebase Console](https://console.firebase.google.com/).
+1. Go to [Firebase Console](https://console.firebase.com/).
 2. Your project is already created: **Utsho-AI**.
-3. In the **Rules** tab of Firestore Database, ensure you have published this:
+3. In the **Rules** tab of Firestore Database, ensure you have published this (CRITICAL for Admin tools to work):
    ```firestore
    rules_version = '2';
    service cloud.firestore {
      match /databases/{database}/documents {
+       // Allow users to manage their own data
        match /users/{userEmail}/{document=**} {
          allow read, write: if true;
+       }
+       // Allow Admin (Shakkhor) to see system logs
+       match /system/{document=**} {
+         allow read, write: if request.auth.token.email == 'shakkhorpaul50@gmail.com';
+         // Allow any authenticated user to log a failure (write only)
+         allow create, update: if request.auth != null;
        }
      }
    }

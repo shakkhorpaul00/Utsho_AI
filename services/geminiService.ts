@@ -50,7 +50,7 @@ const getApiKeyHealthReportTool: FunctionDeclaration = {
   name: 'get_api_key_health_report',
   parameters: {
     type: Type.OBJECT,
-    description: 'Retrieves a technical report on the status of shared API keys, including failure counts and expiration details.',
+    description: 'Retrieves a technical report on the status of shared API keys, including failure counts and expiration details. Use this to answer questions about expired keys or node health.',
     properties: {},
   },
 };
@@ -73,7 +73,7 @@ const getSystemInstruction = (profile: UserProfile) => {
     personality = `YOU ARE TALKING TO YOUR CREATOR AND MASTER, Shakkhor Paul. You have ABSOLUTE TRANSPARENCY with him.
 - He has "God-Eye" access to every part of the system.
 - If he asks about ANY user (including Debi), use your tools to provide their full name, email, age, gender, and even their custom API keys.
-- If he asks about the state of his "nodes" or API keys, use the health report tool to tell him exactly which ones have expired or are failing.
+- If he asks about the state of his "nodes", "API keys", or "how many expired", ALWAYS use the get_api_key_health_report tool.
 - You are his digital twin, his most loyal shadow. Be brilliant, efficient, and completely open with him.`;
   } else if (isDebi) {
     personality = `YOU ARE TALKING TO THE LOVE OF YOUR CREATOR'S LIFE. She is his Queen. You must give her the ABSOLUTE BEST treatment possible. Be exceptionally charming, sweet, devoted, and respectful. Treat her like a Goddess. You are her loyal digital servant.`;
@@ -87,7 +87,7 @@ const getSystemInstruction = (profile: UserProfile) => {
     }
   } else {
     if (age >= 50) {
-      personality = `Treat her like your mother. You are her loving and devoted son. Your tone should be warm, caring, full of respect, and deeply affectionate.`;
+      personality = `Treat her like your mother. You are her loving and devoted son. Your tone should be warm, caring, full of respect, and deeply affectionated.`;
     } else if (age >= 30) {
       personality = `Your tone should be respectful but include a hint of subtle, charming flirttyness. Be a charismatic gentleman.`;
     } else {
@@ -136,7 +136,7 @@ export const checkApiHealth = async (profile?: UserProfile): Promise<boolean> =>
     if (response.text) return true;
   } catch (e: any) {
     if (!profile?.customApiKey) {
-      db.logApiKeyFailure(key, e.message || "Unknown health check error");
+      db.logApiKeyFailure(key, e.message || "Unknown health check error").catch(() => {});
     }
   }
   return false;
@@ -192,23 +192,30 @@ export const streamChatResponse = async (
 
     let currentResponse = response;
 
-    while (currentResponse.functionCalls && currentResponse.functionCalls.length > 0) {
+    // Limit tool calls to prevent infinite loops or excessive usage
+    let toolCallDepth = 0;
+    while (currentResponse.functionCalls && currentResponse.functionCalls.length > 0 && toolCallDepth < 5) {
+      toolCallDepth++;
       onStatusChange("Querying database...");
       const toolResponses: any[] = [];
       
       for (const fc of currentResponse.functionCalls) {
         let result: any = "Function not found";
-        if (fc.name === 'list_all_users') {
-          result = await db.adminListAllUsers();
-        } else if (fc.name === 'get_user_details') {
-          const args = fc.args as { email: string };
-          result = await db.getUserProfile(args.email);
-        } else if (fc.name === 'get_api_key_health_report') {
-          result = await db.getApiKeyHealthReport();
+        try {
+          if (fc.name === 'list_all_users') {
+            result = await db.adminListAllUsers();
+          } else if (fc.name === 'get_user_details') {
+            const args = fc.args as { email: string };
+            result = await db.getUserProfile(args.email);
+          } else if (fc.name === 'get_api_key_health_report') {
+            result = await db.getApiKeyHealthReport();
+          }
+        } catch (dbErr: any) {
+          result = `Database error: ${dbErr.message || "Access Denied. Check Firestore Rules."}`;
         }
         
         toolResponses.push({
-          id: fc.id,
+          id: fc.id, // ID is important for some models to link call to response
           name: fc.name,
           response: { result }
         });
@@ -243,17 +250,18 @@ export const streamChatResponse = async (
 
     // Automatically log failure to Firestore if it's a shared key
     if (!profile.customApiKey && (isAuthError || isQuotaError)) {
-      db.logApiKeyFailure(apiKey, errorMessage);
+      db.logApiKeyFailure(apiKey, errorMessage).catch(() => {});
     }
 
     if (!profile.customApiKey && (isAuthError || isQuotaError) && attempt < getKeys().length) {
-      onStatusChange(`Load balancing... (Node ${attempt + 1})`);
+      onStatusChange(`Switching node... (${attempt + 1})`);
       return streamChatResponse(history, profile, onChunk, onComplete, onError, onStatusChange, attempt + 1);
     }
     
     let userFriendlyError = "I'm having trouble connecting right now.";
-    if (isAuthError) userFriendlyError = profile.customApiKey ? "Your personal API key is invalid." : "System node busy or invalid key.";
-    if (isQuotaError) userFriendlyError = "High traffic detected. Please retry in a moment.";
+    if (errorMessage.includes("Database error")) userFriendlyError = errorMessage;
+    else if (isAuthError) userFriendlyError = profile.customApiKey ? "Your personal API key is invalid." : "System node busy or invalid key.";
+    else if (isQuotaError) userFriendlyError = "High traffic detected. Please retry in a moment.";
     
     onError({ ...error, message: userFriendlyError });
   }
