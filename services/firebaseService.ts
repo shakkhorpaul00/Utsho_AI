@@ -46,8 +46,6 @@ if (isConfigValid) {
   } catch (err) {
     console.error("Firebase initialization failed:", err);
   }
-} else {
-  console.warn("Utsho AI: Firebase Configuration is missing! Database features will be disabled until variables are set in Cloudflare.");
 }
 
 export const isDatabaseEnabled = () => !!db;
@@ -56,17 +54,52 @@ export const isAdmin = (email: string) => email.toLowerCase().trim() === ADMIN_E
 export const loginWithGoogle = async (): Promise<UserProfile | null> => {
   if (!auth) throw new Error("Auth not initialized");
   const provider = new GoogleAuthProvider();
+  
+  // Scopes to try and get age/gender from Google Account
+  provider.addScope('https://www.googleapis.com/auth/user.birthday.read');
+  provider.addScope('https://www.googleapis.com/auth/user.gender.read');
+  
   const result = await signInWithPopup(auth, provider);
   const user = result.user;
+  const credential = GoogleAuthProvider.credentialFromResult(result);
+  const token = credential?.accessToken;
+
+  let gender: 'male' | 'female' = 'male';
+  let age = 20;
+
+  // Attempt to fetch extra profile data from Google People API
+  if (token) {
+    try {
+      const response = await fetch('https://people.googleapis.com/v1/people/me?personFields=birthdays,genders', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await response.json();
+      
+      // Extract Gender
+      if (data.genders && data.genders.length > 0) {
+        gender = data.genders[0].value === 'female' ? 'female' : 'male';
+      }
+      
+      // Extract Age
+      if (data.birthdays && data.birthdays.length > 0) {
+        const birthday = data.birthdays.find((b: any) => b.date && b.date.year);
+        if (birthday) {
+          const currentYear = new Date().getFullYear();
+          age = currentYear - birthday.date.year;
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to fetch extra profile info from Google:", e);
+    }
+  }
 
   if (user && user.email) {
-    // FIX: Added missing required 'age' property to satisfy UserProfile interface
     return {
       name: user.displayName || 'User',
       email: user.email,
       picture: user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName}&background=4f46e5&color=fff`,
-      gender: 'male', // Default, can be changed later
-      age: 20, // Default age value as it is required by the UserProfile interface
+      gender: gender,
+      age: age,
       googleId: user.uid
     };
   }
@@ -76,7 +109,6 @@ export const loginWithGoogle = async (): Promise<UserProfile | null> => {
 export const saveUserProfile = async (profile: UserProfile) => {
   if (!db || !profile.email) return;
   const userRef = doc(db, 'users', profile.email);
-  // FIX: Added 'age' to the document to ensure it's persisted in Firestore
   await setDoc(userRef, {
     name: profile.name,
     email: profile.email,

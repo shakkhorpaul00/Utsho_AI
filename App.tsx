@@ -18,16 +18,11 @@ const App: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [dbStatus, setDbStatus] = useState<boolean>(db.isDatabaseEnabled());
   
-  const [onboardingStep, setOnboardingStep] = useState<1 | 2 | 3 | 4>(1);
-  const [onboardingEmail, setOnboardingEmail] = useState('');
-  const [onboardingName, setOnboardingName] = useState('');
-  const [onboardingAge, setOnboardingAge] = useState<string>('');
-  const [onboardingGender, setOnboardingGender] = useState<Gender | null>(null);
+  const [onboardingStep, setOnboardingStep] = useState<1 | 4>(1);
   const [customKeyInput, setCustomKeyInput] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to bottom whenever messages or loading state changes
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [sessions, activeSessionId, isLoading]);
@@ -43,7 +38,7 @@ const App: React.FC = () => {
         const localProfile = JSON.parse(localProfileStr) as UserProfile;
         setUserProfile(localProfile);
         setCustomKeyInput(localProfile.customApiKey || '');
-        setOnboardingStep(4); // User exists, skip UI overlays
+        setOnboardingStep(4);
         
         if (db.isDatabaseEnabled()) {
           setIsSyncing(true);
@@ -76,67 +71,34 @@ const App: React.FC = () => {
       setIsSyncing(true);
       const googleUser = await db.loginWithGoogle();
       if (googleUser) {
-        const existingCloudProfile = await db.getUserProfile(googleUser.email);
+        let profile = await db.getUserProfile(googleUser.email);
         
-        if (existingCloudProfile) {
-          // Returning User
-          setUserProfile(existingCloudProfile);
-          localStorage.setItem('utsho_profile', JSON.stringify(existingCloudProfile));
-          setCustomKeyInput(existingCloudProfile.customApiKey || '');
-          setOnboardingStep(4); // Switch to app view immediately
-          
-          const cloudSessions = await db.getSessions(googleUser.email);
-          setSessions(cloudSessions);
-          if (cloudSessions.length > 0) {
-            setActiveSessionId(cloudSessions[0].id);
-          } else {
-            createNewSession(googleUser.email);
-          }
-          
-          await performHealthCheck(existingCloudProfile.customApiKey);
-        } else {
-          // Truly New User
-          setOnboardingEmail(googleUser.email);
-          setOnboardingName(googleUser.name);
-          setOnboardingStep(2);
+        if (!profile) {
+          // New User: Use the data fetched directly from Google account
+          profile = googleUser;
+          if (dbStatus) await db.saveUserProfile(profile);
         }
+
+        setUserProfile(profile);
+        localStorage.setItem('utsho_profile', JSON.stringify(profile));
+        setCustomKeyInput(profile.customApiKey || '');
+        setOnboardingStep(4);
+        
+        const cloudSessions = await db.getSessions(profile.email);
+        setSessions(cloudSessions);
+        if (cloudSessions.length > 0) {
+          setActiveSessionId(cloudSessions[0].id);
+        } else {
+          createNewSession(profile.email);
+        }
+        
+        await performHealthCheck(profile.customApiKey);
       }
     } catch (e: any) {
       alert(`Login failed: ${e.message}`);
     } finally {
       setIsSyncing(false);
     }
-  };
-
-  const finalizeOnboarding = async () => {
-    if (!onboardingName || !onboardingEmail || !onboardingGender || !onboardingAge) return;
-    setIsSyncing(true);
-    const profile: UserProfile = {
-      name: onboardingName,
-      email: onboardingEmail.toLowerCase().trim(),
-      gender: onboardingGender,
-      age: parseInt(onboardingAge) || 20,
-      picture: `https://ui-avatars.com/api/?name=${onboardingName}&background=${onboardingGender === 'male' ? '4f46e5' : 'db2777'}&color=fff`,
-      customApiKey: ''
-    };
-    
-    setUserProfile(profile);
-    localStorage.setItem('utsho_profile', JSON.stringify(profile));
-    
-    if (dbStatus) {
-      await db.saveUserProfile(profile);
-    }
-    
-    // Switch to app view immediately
-    setOnboardingStep(4);
-    
-    // Only create session if list is empty
-    if (sessions.length === 0) {
-      createNewSession(profile.email);
-    }
-    
-    setIsSyncing(false);
-    performHealthCheck();
   };
 
   const performHealthCheck = async (key?: string) => {
@@ -162,7 +124,6 @@ const App: React.FC = () => {
     const email = emailOverride || userProfile?.email;
     if (!email) return;
 
-    // IDEMPOTENCY CHECK: Don't create if there's already an empty "New Chat" session
     const emptySession = sessions.find(s => s.messages.length === 0);
     if (emptySession) {
       setActiveSessionId(emptySession.id);
@@ -265,55 +226,21 @@ const App: React.FC = () => {
     );
   };
 
-  // Condition for showing Onboarding overlay vs the Main App
-  if (!userProfile || (onboardingStep > 1 && onboardingStep < 4)) {
+  if (!userProfile || onboardingStep === 1) {
     return (
       <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
         <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-[2.5rem] p-10 shadow-2xl space-y-8 animate-in fade-in zoom-in duration-300">
-          {onboardingStep === 1 ? (
-            <div className="text-center space-y-6">
-              <div className="flex justify-center"><div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-white floating-ai shadow-[0_0_20px_rgba(79,70,229,0.4)]"><Sparkles size={32} /></div></div>
-              <div className="space-y-2">
-                <h1 className="text-3xl font-black tracking-tight">Utsho AI</h1>
-                <p className="text-zinc-500 text-sm">Secure and Personalized digital version of Shakkhor Paul.</p>
-              </div>
-              <button onClick={handleGoogleLogin} disabled={isSyncing} className="w-full bg-white text-zinc-950 font-bold py-4 rounded-2xl flex items-center justify-center gap-3 hover:bg-zinc-100 transition-all active:scale-95 disabled:opacity-50">
-                {isSyncing ? <RefreshCcw size={20} className="animate-spin" /> : <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="" />}
-                {isSyncing ? 'Synchronizing...' : 'Sign in with Google'}
-              </button>
+          <div className="text-center space-y-6">
+            <div className="flex justify-center"><div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-white floating-ai shadow-[0_0_20px_rgba(79,70,229,0.4)]"><Sparkles size={32} /></div></div>
+            <div className="space-y-2">
+              <h1 className="text-3xl font-black tracking-tight">Utsho AI</h1>
+              <p className="text-zinc-500 text-sm">Instant Sync • One-Tap Personality • Secure</p>
             </div>
-          ) : onboardingStep === 2 ? (
-            <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
-               <div className="text-center space-y-2">
-                <h2 className="text-2xl font-bold">Privacy Check</h2>
-                <p className="text-zinc-500 text-xs">For your safety, Google does not share Age/Gender automatically. Please provide it once for proper AI personality.</p>
-              </div>
-              <div className="space-y-4">
-                <input type="text" value={onboardingName} onChange={e => setOnboardingName(e.target.value)} placeholder="Display Name" className="w-full bg-zinc-800 border border-zinc-700 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-indigo-500 outline-none" />
-                <div className="relative">
-                  <Calendar className="absolute left-5 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
-                  <input type="number" value={onboardingAge} onChange={e => setOnboardingAge(e.target.value)} placeholder="Your Age" className="w-full bg-zinc-800 border border-zinc-700 rounded-2xl py-4 pl-14 pr-6 focus:ring-2 focus:ring-indigo-500 outline-none" />
-                </div>
-                <button onClick={() => setOnboardingStep(3)} disabled={!onboardingName || !onboardingAge} className="w-full bg-indigo-600 py-4 rounded-2xl font-bold hover:bg-indigo-500 transition-all disabled:opacity-50 shadow-xl">Next</button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-8 text-center animate-in fade-in slide-in-from-right-4">
-              <div className="space-y-2">
-                <h2 className="text-2xl font-bold">Pick Personality</h2>
-                <p className="text-zinc-500 text-sm">How should the AI treat you?</p>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <button onClick={() => setOnboardingGender('male')} className={`p-6 rounded-3xl border-2 transition-all active:scale-95 ${onboardingGender === 'male' ? 'border-indigo-500 bg-indigo-500/10' : 'border-zinc-800 bg-zinc-800/50'}`}>
-                  <span className="text-4xl block mb-2">👦</span> Male
-                </button>
-                <button onClick={() => setOnboardingGender('female')} className={`p-6 rounded-3xl border-2 transition-all active:scale-95 ${onboardingGender === 'female' ? 'border-pink-500 bg-pink-500/10' : 'border-zinc-800 bg-zinc-800/50'}`}>
-                  <span className="text-4xl block mb-2">👧</span> Female
-                </button>
-              </div>
-              <button onClick={finalizeOnboarding} disabled={!onboardingGender} className="w-full bg-white text-zinc-950 font-bold py-4 rounded-2xl shadow-xl disabled:opacity-50 hover:bg-zinc-100 transition-colors">Start Chatting</button>
-            </div>
-          )}
+            <button onClick={handleGoogleLogin} disabled={isSyncing} className="w-full bg-white text-zinc-950 font-bold py-4 rounded-2xl flex items-center justify-center gap-3 hover:bg-zinc-100 transition-all active:scale-95 disabled:opacity-50">
+              {isSyncing ? <RefreshCcw size={20} className="animate-spin" /> : <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="" />}
+              {isSyncing ? 'Synchronizing Profile...' : 'Sign in with Google'}
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -327,7 +254,6 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen bg-zinc-950 text-zinc-100 overflow-hidden font-['Hind_Siliguri',_sans-serif]">
-      {/* Settings Modal */}
       {isSettingsOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setIsSettingsOpen(false)} />
@@ -336,7 +262,6 @@ const App: React.FC = () => {
             <div className="space-y-4">
               <label className="text-xs text-zinc-500 uppercase font-bold tracking-widest">Personal Gemini Key</label>
               <input type="password" value={customKeyInput} onChange={e => setCustomKeyInput(e.target.value)} placeholder="AIza..." className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-sm outline-none font-mono focus:ring-2 focus:ring-indigo-500" />
-              <p className="text-[10px] text-zinc-500 italic">Adding your own key bypasses the shared pool limits.</p>
             </div>
             <div className="flex gap-4">
               <button onClick={() => setIsSettingsOpen(false)} className="flex-1 py-3 font-bold text-zinc-500 hover:text-white transition-colors">Cancel</button>
@@ -346,7 +271,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Sidebar */}
       <aside className={`fixed md:relative z-50 inset-y-0 left-0 w-72 bg-zinc-900/50 backdrop-blur-xl border-r border-zinc-800 flex flex-col transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         <div className="p-4 flex flex-col gap-4">
           <button onClick={() => createNewSession()} className="bg-zinc-100 text-zinc-950 py-3.5 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-xl active:scale-95 transition-all"><Plus size={18} /> New Chat</button>
@@ -387,9 +311,7 @@ const App: React.FC = () => {
         </div>
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 flex flex-col relative pt-14 md:pt-0">
-        {/* Mobile Header */}
         <div className="md:hidden absolute top-0 inset-x-0 h-14 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-800 z-40 flex items-center px-4">
           <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-zinc-400"><Menu size={20} /></button>
           <span className="flex-1 text-center font-bold text-sm tracking-tight flex items-center justify-center gap-1"><Sparkles size={14} className="text-indigo-500" /> Utsho AI</span>
@@ -404,8 +326,8 @@ const App: React.FC = () => {
                   <Sparkles size={40} className="text-white" />
                 </div>
                 <div className="space-y-2">
-                  <h2 className="text-4xl font-black mb-2">Hello, {userProfile.name.split(' ')[0]}</h2>
-                  <p className="text-zinc-500 max-w-sm mx-auto italic">"Treat others as you want to be treated." - I am ready to help, {userRoleLabel}.</p>
+                  <h2 className="text-4xl font-black mb-2">Welcome, {userProfile.name.split(' ')[0]}</h2>
+                  <p className="text-zinc-500 max-w-sm mx-auto italic">"Ready to chat with you, {userRoleLabel}."</p>
                 </div>
               </div>
             ) : (
@@ -424,7 +346,6 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Input Area */}
         <div className="p-4 md:p-8 bg-zinc-950/80 backdrop-blur-md border-t border-zinc-900/50">
           <div className="max-w-3xl mx-auto space-y-6">
             <div className="relative group">
@@ -435,7 +356,6 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Admin/Developer Footer */}
             <footer className="pt-2 flex flex-col md:flex-row items-center justify-center gap-4 md:gap-8 opacity-40 hover:opacity-100 transition-all duration-500">
                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">
                   <Zap size={12} className="text-amber-500" /> Admin: Shakkhor Paul
@@ -452,7 +372,7 @@ const App: React.FC = () => {
                   </a>
                </div>
                <div className="hidden md:block text-[9px] text-zinc-700 font-bold uppercase tracking-widest">
-                  Powered by Shakkhor • Gemini 3 Flash
+                  Powered by Shakkhor Paul
                </div>
             </footer>
           </div>
