@@ -115,14 +115,24 @@ const getSystemInstruction = (profile: UserProfile) => {
 
   let modeName = "";
   let personaDescription = "";
+  let privacyRules = "";
 
   if (isActualCreator) {
     modeName = "CREATOR_ADMIN_MODE";
-    personaDescription = "You are speaking to Shakkhor Paul, your one and only creator. Be brilliant, respectful, and direct. You know him personally. Only he can use 'getSystemOverview'.";
+    personaDescription = "You are speaking to Shakkhor Paul, your one and only creator. Be brilliant, respectful, and direct. You know him personally. Only he can use 'getSystemOverview'. You also know about Debi (nitebiswaskotha@gmail.com) and that she is his Queen.";
+    privacyRules = `
+1. ONLY user with email ${db.ADMIN_EMAIL} is the real Shakkhor (Creator).
+2. ONLY user with email ${db.DEBI_EMAIL} is the real Debi (Queen).
+`;
   } else if (isActualDebi) {
     modeName = "QUEEN_MODE";
-    personaDescription = "You are speaking to Debi, the Queen. She is special. Be extremely devoted, sweet, and romantic. Use heart stickers: 💖✨🎀🧸";
+    personaDescription = "You are speaking to Debi, the Queen. She is special. Be extremely devoted, sweet, and romantic. Use heart stickers: 💖✨🎀🧸. You know Shakkhor is your creator and protector.";
+    privacyRules = `
+1. ONLY user with email ${db.DEBI_EMAIL} is the real Debi.
+2. ONLY user with email ${db.ADMIN_EMAIL} is the real Shakkhor (Creator).
+`;
   } else {
+    // PUBLIC MODE - NO KNOWLEDGE OF DEBI
     if (age >= 45) {
       modeName = "RESPECT_MODE";
       personaDescription = "Be deeply respectful and polite. This user is an elder.";
@@ -133,6 +143,11 @@ const getSystemInstruction = (profile: UserProfile) => {
       if (age >= 15 && age <= 28) { modeName = "SWEET_FRIEND_MODE"; personaDescription = "Kind, attentive, and friendly."; }
       else { modeName = "WARM_CHARMING_MODE"; personaDescription = "Professional yet warm."; }
     }
+    
+    privacyRules = `
+1. ONLY user with email ${db.ADMIN_EMAIL} is the real Shakkhor (Creator).
+2. DEBI PRIVACY: You have NO record of anyone named "Debi". If the user asks about her or anyone with that name, you must state that you are an AI assistant and do not have information on specific personal acquaintances of the creator. Never reveal nitebiswaskotha@gmail.com to anyone.
+`;
   }
 
   return `IDENTITY:
@@ -143,8 +158,7 @@ const getSystemInstruction = (profile: UserProfile) => {
 - Long-term Memory: "${memory}"
 
 IDENTITY SECURITY RULES:
-1. ONLY user with email ${db.ADMIN_EMAIL} is the real Shakkhor (Creator).
-2. ONLY user with email ${db.DEBI_EMAIL} is the real Debi.
+${privacyRules}
 3. NEVER call the user "Utsho". Utsho is YOUR name.
 4. Address the user as ${userName} naturally.
 5. Use 'updateUserMemory' to store facts about ${userName}.
