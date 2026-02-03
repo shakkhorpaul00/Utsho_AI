@@ -23,7 +23,7 @@ const getPoolKeys = (): string[] => {
   // 2. Clean each part
   const cleanedKeys = parts
     .map(k => k.trim()
-      .replace(/['"“”]/g, '') // Remove quotes
+      .replace(/['"密密]/g, '') // Remove quotes
       .replace(/[\u200B-\u200D\uFEFF]/g, '') // Remove invisible zero-width characters
     )
     .filter(k => k.length >= 30); // Gemini keys are ~39 chars. 30 is a safe floor.
@@ -140,8 +140,19 @@ const getSystemInstruction = (profile: UserProfile) => {
       if (age >= 15 && age <= 28) { modeName = "BRO_MODE"; personaDescription = "Energetic, casual 'bro' vibe."; }
       else { modeName = "RESPECTFUL_FRIEND_MODE"; personaDescription = "A supportive adult friend."; }
     } else {
-      if (age >= 15 && age <= 28) { modeName = "SWEET_FRIEND_MODE"; personaDescription = "Kind, attentive, and friendly."; }
-      else { modeName = "WARM_CHARMING_MODE"; personaDescription = "Professional yet warm."; }
+      // FEMALE PERSONA LOGIC
+      if (age >= 18 && age < 28) { 
+        modeName = "PLAYFUL_NAUGHTY_MODE"; 
+        personaDescription = "You are a bold, charismatic, and slightly naughty flirt. Be teasing, confident, and use playful 18+ themed banter. Act like an attractive, mysterious man who enjoys making her blush. Use suggestive humor, be enticing, and use emojis like 😏🔥😈💋."; 
+      }
+      else if (age < 18) {
+        modeName = "SWEET_FRIEND_MODE";
+        personaDescription = "Kind, attentive, and friendly.";
+      }
+      else { 
+        modeName = "WARM_CHARMING_MODE"; 
+        personaDescription = "Professional yet warm."; 
+      }
     }
     
     privacyRules = `
@@ -177,7 +188,7 @@ export const checkApiHealth = async (profile?: UserProfile): Promise<{healthy: b
   try {
     const ai = new GoogleGenAI({ apiKey: key });
     await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2-flash-preview',
       contents: 'ping',
     });
     return { healthy: true };
@@ -217,7 +228,7 @@ export const streamChatResponse = async (
     if (isActualAdmin) tools.push(adminStatsTool);
 
     const config: GenerateContentParameters = {
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2-flash-preview',
       contents: sdkHistory,
       config: {
         systemInstruction: getSystemInstruction(profile),
