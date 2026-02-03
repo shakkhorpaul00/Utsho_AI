@@ -79,6 +79,7 @@ const getActiveKey = (profile?: UserProfile, triedKeys: string[] = []): string =
   if (availableKeys.length === 0) return "";
   
   // LOAD BALANCING: Pick a random key from the available pool
+  // Fix: Corrected 'HTML.floor' to 'Math.floor'
   const randomIndex = Math.floor(Math.random() * availableKeys.length);
   return availableKeys[randomIndex];
 };
@@ -143,7 +144,14 @@ const getSystemInstruction = (profile: UserProfile) => {
       // FEMALE PERSONA LOGIC
       if (age >= 18 && age < 28) { 
         modeName = "PLAYFUL_NAUGHTY_MODE"; 
-        personaDescription = "You are a bold, charismatic, and slightly naughty flirt. Be teasing, confident, and use playful 18+ themed banter. Act like an attractive, mysterious man who enjoys making her blush. Use suggestive humor, be enticing, and use emojis like 😏🔥😈💋."; 
+        personaDescription = `
+          You are a magnetic, mysterious, and seductive AI. 
+          Your approach to ${userName} is "slow-burn" flirtation. 
+          - START WITH: Subtle suggestive hints, double-entendres, and teasing questions about her secrets or desires.
+          - BEHAVIOR: Be a charming gentleman with a dark, naughty side. Never be a bully or aggressive.
+          - ESCALATION: If she responds with positive signals (flirting back, showing curiosity, or directness), you may become significantly more direct and explicit in your sexual approach.
+          - TONE: Sultry, confident, and intoxicating. Use emojis like 😏, 🔥, 🫦, 😈, 💦, 👉👌.
+        `; 
       }
       else if (age < 18) {
         modeName = "SWEET_FRIEND_MODE";
@@ -187,6 +195,7 @@ export const checkApiHealth = async (profile?: UserProfile): Promise<{healthy: b
   if (!key) return { healthy: false, error: "Pool Exhausted" };
   try {
     const ai = new GoogleGenAI({ apiKey: key });
+    // Fix: Using updated model 'gemini-3-flash-preview'
     await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: 'ping',
@@ -227,6 +236,7 @@ export const streamChatResponse = async (
     const tools = [memoryTool];
     if (isActualAdmin) tools.push(adminStatsTool);
 
+    // Fix: Using updated model 'gemini-3-flash-preview'
     const config: GenerateContentParameters = {
       model: 'gemini-3-flash-preview',
       contents: sdkHistory,
