@@ -1,8 +1,11 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Plus, MessageSquare, Trash2, Menu, Sparkles, LogOut, RefreshCcw, Settings, Globe, AlertCircle, Activity, Paperclip, X, Facebook, Instagram, Zap } from 'lucide-react';
-import { ChatSession, Message, UserProfile, Gender } from './types';
+import { Send, Plus, MessageSquare, Trash2, Menu, Sparkles, LogOut, RefreshCcw, Settings, Globe, AlertCircle, Zap, Paperclip, X, Facebook, Instagram, CreditCard, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { ChatSession, Message, UserProfile, Gender, SubscriptionStatus } from './types';
 import { streamChatResponse, checkApiHealth, getPoolStatus, adminResetPool, getLastNodeError } from './services/geminiService';
 import * as db from './services/firebaseService';
+
+const FREE_MESSAGE_LIMIT = 5;
 
 const App: React.FC = () => {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -12,6 +15,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
   const [apiStatusText, setApiStatusText] = useState<string>('Ready');
   const [connectionHealth, setConnectionHealth] = useState<'perfect' | 'error'>('perfect');
   const [poolInfo, setPoolInfo] = useState({ total: 0, active: 0, exhausted: 0 });
@@ -21,6 +25,8 @@ const App: React.FC = () => {
   const [tempAge, setTempAge] = useState<string>('');
   const [tempGender, setTempGender] = useState<Gender | null>(null);
   const [customKeyInput, setCustomKeyInput] = useState('');
+  const [trxId, setTrxId] = useState('');
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   
   const [selectedImage, setSelectedImage] = useState<{ data: string, mimeType: string } | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -30,6 +36,12 @@ const App: React.FC = () => {
 
   const isAdmin = userProfile ? db.isAdmin(userProfile.email) : false;
   const isUserDebi = userProfile?.email.toLowerCase().trim() === 'nitebiswaskotha@gmail.com';
+  const isPro = userProfile?.subscriptionStatus === 'pro' || isAdmin;
+
+  // Calculate total messages sent by user across all sessions
+  const totalUserMessages = sessions.reduce((acc, session) => 
+    acc + session.messages.filter(m => m.role === 'user').length, 0
+  );
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -52,9 +64,10 @@ const App: React.FC = () => {
         if (db.isDatabaseEnabled()) {
           try {
             const cloudProfile = await db.getUserProfile(localProfile.email);
-            if (cloudProfile && cloudProfile.age > 0) {
+            if (cloudProfile) {
               setUserProfile(cloudProfile);
               setCustomKeyInput(cloudProfile.customApiKey || '');
+              localStorage.setItem('utsho_profile', JSON.stringify(cloudProfile));
             }
             const cloudSessions = await db.getSessions(localProfile.email);
             setSessions(cloudSessions);
@@ -98,7 +111,7 @@ const App: React.FC = () => {
 
   const finalizePersonalization = async () => {
     if (!userProfile || !tempGender || !tempAge) return;
-    const final: UserProfile = { ...userProfile, age: parseInt(tempAge) || 20, gender: tempGender };
+    const final: UserProfile = { ...userProfile, age: parseInt(tempAge) || 20, gender: tempGender, subscriptionStatus: 'free' };
     setUserProfile(final);
     localStorage.setItem('utsho_profile', JSON.stringify(final));
     if (db.isDatabaseEnabled()) await db.saveUserProfile(final);
@@ -121,6 +134,24 @@ const App: React.FC = () => {
     performHealthCheck();
   };
 
+  const handleSubscription = async () => {
+    if (!trxId.trim() || !userProfile) return;
+    setIsProcessingPayment(true);
+    // Simulate payment verification
+    setTimeout(async () => {
+      const updatedProfile = { ...userProfile, subscriptionStatus: 'pro' as SubscriptionStatus };
+      setUserProfile(updatedProfile);
+      localStorage.setItem('utsho_profile', JSON.stringify(updatedProfile));
+      if (db.isDatabaseEnabled()) {
+        await db.updateSubscriptionStatus(userProfile.email, 'pro');
+      }
+      setIsProcessingPayment(false);
+      setIsSubscriptionOpen(false);
+      setTrxId('');
+      alert("Subscription Activated! Enjoy unlimited messages.");
+    }, 2000);
+  };
+
   const saveSettings = async () => {
     if (!userProfile) return;
     const updated = { ...userProfile, customApiKey: customKeyInput.trim() };
@@ -139,43 +170,16 @@ const App: React.FC = () => {
     if (db.isDatabaseEnabled()) db.saveSession(emailOverride || userProfile!.email, newSession).catch(console.error);
   };
 
-  const compressImage = (base64Str: string, maxWidth = 800): Promise<string> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.src = base64Str;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
-        if (width > height) { if (width > maxWidth) { height *= maxWidth / width; width = maxWidth; } }
-        else { if (height > maxWidth) { width *= maxWidth / height; height = maxWidth; } }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
-      };
-    });
-  };
-
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setApiStatusText("Processing...");
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const originalBase64 = reader.result as string;
-      const compressed = await compressImage(originalBase64);
-      const dataOnly = compressed.split(',')[1];
-      setSelectedImage({ data: dataOnly, mimeType: 'image/jpeg' });
-      setImagePreview(compressed);
-      setApiStatusText("Ready");
-    };
-    reader.readAsDataURL(file);
-  };
-
   const handleSendMessage = async () => {
-    if ((!inputText.trim() && !selectedImage) || isLoading || !activeSessionId || !userProfile) return;
+    if (!userProfile) return;
+    
+    // Enforce limit for free users
+    if (!isPro && totalUserMessages >= FREE_MESSAGE_LIMIT) {
+      setIsSubscriptionOpen(true);
+      return;
+    }
+
+    if ((!inputText.trim() && !selectedImage) || isLoading || !activeSessionId) return;
     
     const userMsg: Message = { 
       id: crypto.randomUUID(), 
@@ -204,9 +208,7 @@ const App: React.FC = () => {
     await streamChatResponse(
       history,
       userProfile,
-      (chunk) => {
-        // Real-time chunk handling could be implemented if desired
-      },
+      (chunk) => {},
       (fullText, sources, imageUrl) => {
         setIsLoading(false);
         const parts = fullText.split('[SPLIT]').map(p => p.trim()).filter(p => p.length > 0);
@@ -237,6 +239,19 @@ const App: React.FC = () => {
       },
       (status) => setApiStatusText(status)
     );
+  };
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const originalBase64 = reader.result as string;
+      const dataOnly = originalBase64.split(',')[1];
+      setSelectedImage({ data: dataOnly, mimeType: 'image/jpeg' });
+      setImagePreview(originalBase64);
+    };
+    reader.readAsDataURL(file);
   };
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
@@ -300,6 +315,48 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {isSubscriptionOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 backdrop-blur-md bg-black/60 overflow-y-auto">
+           <div className="bg-zinc-900 border border-zinc-800 p-6 md:p-10 rounded-[2.5rem] w-full max-w-lg space-y-8 shadow-2xl animate-in zoom-in fade-in duration-300">
+              <div className="flex justify-between items-start">
+                <div className="space-y-1">
+                  <h3 className="text-2xl font-black text-indigo-400 flex items-center gap-2 uppercase tracking-tighter"><CreditCard size={28} /> Utsho Pro</h3>
+                  <p className="text-zinc-500 text-sm font-medium">Unlock unlimited conversations & memory.</p>
+                </div>
+                <button onClick={() => setIsSubscriptionOpen(false)} className="p-2 text-zinc-600 hover:text-white"><X size={24} /></button>
+              </div>
+
+              <div className="bg-indigo-600/10 border border-indigo-500/20 p-6 rounded-3xl space-y-4">
+                 <div className="flex items-center justify-between">
+                    <span className="text-sm font-bold text-zinc-300">Monthly Plan</span>
+                    <span className="text-2xl font-black text-white">5 BDT <span className="text-xs text-zinc-400 font-medium">/ month</span></span>
+                 </div>
+                 <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-emerald-400 font-bold"><CheckCircle2 size={14} /> Unlimited Chat Messages</div>
+                    <div className="flex items-center gap-2 text-xs text-emerald-400 font-bold"><CheckCircle2 size={14} /> Full Context Memory Access</div>
+                    <div className="flex items-center gap-2 text-xs text-emerald-400 font-bold"><CheckCircle2 size={14} /> Priority Node Access</div>
+                 </div>
+              </div>
+
+              <div className="space-y-4">
+                 <div className="p-4 bg-zinc-800/50 rounded-2xl border border-zinc-700 space-y-2">
+                    <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Payment Instruction</p>
+                    <p className="text-sm font-medium text-zinc-300">Send Money (5 BDT) to: <span className="text-pink-500 font-black">01XXXXXXXXX</span> (bKash)</p>
+                    <p className="text-[10px] text-zinc-500 italic">Enter your Transaction ID (TrxID) below to verify instantly.</p>
+                 </div>
+                 
+                 <div className="space-y-2">
+                    <input type="text" value={trxId} onChange={e => setTrxId(e.target.value)} placeholder="Enter TrxID (e.g. AB12CD34)" className="w-full bg-zinc-800 border border-zinc-700 p-4 rounded-xl outline-none focus:border-pink-500 text-sm font-mono text-white" />
+                 </div>
+              </div>
+
+              <button onClick={handleSubscription} disabled={!trxId.trim() || isProcessingPayment} className={`w-full py-4 rounded-2xl font-black text-white transition-all flex items-center justify-center gap-2 ${trxId.trim() && !isProcessingPayment ? 'bg-pink-600 shadow-xl shadow-pink-600/20 hover:scale-[1.02]' : 'bg-zinc-800 text-zinc-600 cursor-not-allowed'}`}>
+                 {isProcessingPayment ? <RefreshCcw size={20} className="animate-spin" /> : <><ShieldCheck size={20} /> Verify & Activate</>}
+              </button>
+           </div>
+        </div>
+      )}
+
       <aside className={`fixed md:relative z-50 inset-y-0 left-0 w-72 bg-zinc-900 border-r border-zinc-800 flex flex-col transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         <div className="p-4 flex flex-col gap-4">
           <button onClick={() => createNewSession()} className="bg-zinc-100 text-zinc-950 py-3.5 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg hover:bg-white transition-all active:scale-95"><Plus size={18} /> New Chat</button>
@@ -326,13 +383,21 @@ const App: React.FC = () => {
                 <div className={`text-[9px] font-black text-center py-1 rounded-lg truncate ${connectionHealth === 'error' ? 'text-red-400 bg-red-400/5' : 'text-zinc-400 bg-zinc-800/50'}`}>
                   {apiStatusText.toUpperCase()} {isLoading && "..."}
                 </div>
-                {lastErrorDiagnostic !== "None" && (
-                  <div className="text-[8px] text-zinc-600 mt-2 italic break-words leading-tight px-1 text-center font-mono">
-                    {lastErrorDiagnostic}
-                  </div>
-                )}
              </div>
           </div>
+
+          {!isPro && (
+            <div onClick={() => setIsSubscriptionOpen(true)} className="p-4 bg-indigo-600/10 border border-indigo-500/20 rounded-[2rem] cursor-pointer hover:bg-indigo-600/20 transition-all space-y-2 group">
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-black text-indigo-400">FREE LIMIT</span>
+                <span className="text-[10px] font-black text-zinc-400">{totalUserMessages}/{FREE_MESSAGE_LIMIT}</span>
+              </div>
+              <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                 <div className="h-full bg-indigo-500 transition-all" style={{ width: `${(totalUserMessages / FREE_MESSAGE_LIMIT) * 100}%` }} />
+              </div>
+              <p className="text-[9px] text-zinc-500 text-center font-bold uppercase">Upgrade to Pro</p>
+            </div>
+          )}
           
           <div className="flex items-center justify-between px-3 py-2 bg-zinc-800/30 rounded-xl border border-zinc-800/50">
             <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Settings</span>
@@ -355,7 +420,7 @@ const App: React.FC = () => {
             <img src={userProfile?.picture} className="w-9 h-9 rounded-full border border-zinc-700" alt="" />
             <div className="flex-1 truncate text-[11px] font-bold text-zinc-400 leading-tight">
               {userProfile?.name} <br/> 
-              <span className="text-[9px] text-zinc-600 uppercase tracking-widest">{userProfile?.age}Y • {userProfile?.gender}</span>
+              <span className="text-[9px] text-zinc-600 uppercase tracking-widest">{userProfile?.age}Y • {userProfile?.gender} • {userProfile?.subscriptionStatus?.toUpperCase()}</span>
             </div>
             <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="text-zinc-600 hover:text-red-500 transition-colors"><LogOut size={16} /></button>
           </div>
@@ -430,7 +495,7 @@ const App: React.FC = () => {
               <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSelect} />
               <button onClick={() => fileInputRef.current?.click()} className="p-3.5 text-zinc-500 hover:text-indigo-400 transition-colors"><Paperclip size={22} /></button>
               <textarea rows={1} value={inputText} onChange={e => { setInputText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder="Talk to Utsho..." className="flex-1 bg-transparent py-3.5 px-2 outline-none resize-none max-h-40 text-[15px] text-zinc-100 placeholder-zinc-600" />
-              <button onClick={handleSendMessage} disabled={(!inputText.trim() && !selectedImage) || isLoading} className={`p-4 rounded-full transition-all active:scale-90 shadow-xl ${ (inputText.trim() || selectedImage) && !isLoading ? (isUserDebi ? 'bg-pink-600 shadow-pink-600/20' : 'bg-indigo-600 shadow-indigo-500/20') : 'bg-zinc-800 text-zinc-600'}`}>
+              <button onClick={handleSendMessage} disabled={isLoading} className={`p-4 rounded-full transition-all active:scale-90 shadow-xl ${ (inputText.trim() || selectedImage) && !isLoading ? (isUserDebi ? 'bg-pink-600 shadow-pink-600/20' : 'bg-indigo-600 shadow-indigo-500/20') : 'bg-zinc-800 text-zinc-600'}`}>
                  {isLoading ? <RefreshCcw size={22} className="animate-spin" /> : <Send size={22} />}
               </button>
             </div>

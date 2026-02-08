@@ -1,6 +1,7 @@
 
 export type Role = 'user' | 'model';
 export type Gender = 'male' | 'female';
+export type SubscriptionStatus = 'free' | 'pro';
 
 export interface UserProfile {
   name: string;
@@ -11,7 +12,8 @@ export interface UserProfile {
   googleId?: string;
   customApiKey?: string;
   emotionalMemory?: string; 
-  preferredLanguage?: string; // New: Persistent language preference
+  preferredLanguage?: string;
+  subscriptionStatus?: SubscriptionStatus; // New: track payment status
 }
 
 export interface Message {

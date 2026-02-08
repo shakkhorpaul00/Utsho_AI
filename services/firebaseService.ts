@@ -21,7 +21,7 @@ import {
   GoogleAuthProvider, 
   Auth 
 } from 'firebase/auth';
-import { UserProfile, ChatSession, Message, ApiKeyHealth } from '../types';
+import { UserProfile, ChatSession, Message, ApiKeyHealth, SubscriptionStatus } from '../types';
 
 const firebaseConfig = {
   apiKey: process.env.FIREBASE_API_KEY,
@@ -103,7 +103,8 @@ export const loginWithGoogle = async (): Promise<UserProfile | null> => {
       picture: user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName}&background=4f46e5&color=fff`,
       gender: 'male', 
       age: 0,        
-      googleId: user.uid
+      googleId: user.uid,
+      subscriptionStatus: 'free'
     };
   }
   return null;
@@ -121,8 +122,15 @@ export const saveUserProfile = async (profile: UserProfile) => {
     googleId: profile.googleId || '',
     customApiKey: profile.customApiKey || '',
     emotionalMemory: profile.emotionalMemory || '',
-    preferredLanguage: profile.preferredLanguage || ''
+    preferredLanguage: profile.preferredLanguage || '',
+    subscriptionStatus: profile.subscriptionStatus || 'free'
   }, { merge: true });
+};
+
+export const updateSubscriptionStatus = async (email: string, status: SubscriptionStatus) => {
+  if (!db || !email) return;
+  const userRef = doc(db, 'users', email.toLowerCase());
+  await setDoc(userRef, { subscriptionStatus: status }, { merge: true });
 };
 
 export const updateUserLanguage = async (email: string, language: string) => {
