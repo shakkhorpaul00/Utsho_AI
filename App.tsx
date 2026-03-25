@@ -219,10 +219,17 @@ const App: React.FC = () => {
     }
 
     // Check for image generation request
-    const isImageRequest = inputText.toLowerCase().startsWith('/draw') || 
-                          inputText.toLowerCase().startsWith('/image') ||
-                          inputText.toLowerCase().includes('generate image') ||
-                          inputText.toLowerCase().includes('draw me a');
+    const lowerInput = inputText.toLowerCase();
+    const isImageRequest = lowerInput.startsWith('/draw') || 
+                          lowerInput.startsWith('/image') ||
+                          lowerInput.includes('generate image') ||
+                          lowerInput.includes('generate a picture') ||
+                          lowerInput.includes('draw a picture') ||
+                          lowerInput.includes('draw me a') ||
+                          lowerInput.includes('create an image') ||
+                          lowerInput.includes('ছবি আঁকো') ||
+                          lowerInput.includes('ছবি তৈরি করো') ||
+                          lowerInput.includes('একটি ছবি');
 
     if (isImageRequest) {
       setApiStatusText("Generating image...");
@@ -241,7 +248,13 @@ const App: React.FC = () => {
         return;
       }
 
-      const imagePrompt = inputText.replace(/^\/(draw|image)\s*/i, '').trim() || "A beautiful landscape";
+      const imagePrompt = inputText
+        .replace(/^\/(draw|image)\s*/i, '')
+        .replace(/^generate (image|picture) of/i, '')
+        .replace(/^draw (a picture|an image) of/i, '')
+        .replace(/^create (an image|a picture) of/i, '')
+        .replace(/^(ছবি আঁকো|ছবি তৈরি করো|একটি ছবি)\s*/i, '')
+        .trim() || "A beautiful landscape";
       const imageUrl = await generateImage(imagePrompt);
 
       if (imageUrl) {
@@ -259,8 +272,17 @@ const App: React.FC = () => {
         setApiStatusText("Image Generated");
         return;
       } else {
-        // Fallback to text if image generation fails
-        console.warn("Image generation failed, falling back to text.");
+        setIsLoading(false);
+        const errorMsg: Message = { 
+          id: crypto.randomUUID(), 
+          role: 'model', 
+          content: "Sorry, I couldn't generate that image right now. Please try again later.", 
+          timestamp: new Date() 
+        };
+        const updatedMessages = [...history, errorMsg];
+        setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, messages: updatedMessages } : s));
+        setApiStatusText("Error Generating Image");
+        return;
       }
     }
 

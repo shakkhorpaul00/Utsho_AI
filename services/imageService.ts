@@ -11,17 +11,22 @@ export const generateImage = async (prompt: string): Promise<string | null> => {
     const encodedPrompt = encodeURIComponent(prompt);
     const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true&enhance=true&seed=${Math.floor(Math.random() * 1000000)}`;
 
-    // We fetch the image and convert it to base64 so it can be handled like the previous version
-    const response = await fetch(imageUrl);
-    if (!response.ok) throw new Error("Failed to fetch image from Pollinations");
+    // We try to fetch the image and convert it to base64 for persistence
+    try {
+      const response = await fetch(imageUrl);
+      if (!response.ok) throw new Error("Failed to fetch image from Pollinations");
 
-    const blob = await response.blob();
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    });
+      const blob = await response.blob();
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => resolve(imageUrl); // Fallback to URL if base64 conversion fails
+        reader.readAsDataURL(blob);
+      });
+    } catch (fetchError) {
+      console.warn("IMAGE_SERVICE: Fetch failed, returning direct URL:", fetchError);
+      return imageUrl; // Return direct URL if fetch/CORS fails
+    }
   } catch (error) {
     console.error("IMAGE_SERVICE: Error generating image:", error);
     return null;
