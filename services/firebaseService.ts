@@ -172,7 +172,7 @@ export const getApiKeyHealthReport = async (): Promise<ApiKeyHealth[]> => {
 
 const sanitizeMessages = (messages: Message[]) => {
   return messages.map(m => {
-    const { imagePart, imageUrl, timestamp, ...rest } = m; 
+    const { imagePart, imageUrl, documentText, timestamp, ...rest } = m; 
     const persistedImageUrl = imageUrl || null;
     const sanitized: any = {
       ...rest,

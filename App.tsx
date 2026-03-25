@@ -5,6 +5,7 @@ import { ChatSession, Message, UserProfile, Gender } from './types';
 import { streamChatResponse, checkApiHealth, getPoolStatus, adminResetPool, getLastNodeError, getActiveKey } from './services/groqService';
 import { generateImage, getRemainingImageGenerations, getImageDailyLimit } from './services/imageService';
 import { analyzeConversation } from './services/userLearningService';
+import { parseFile, detectFileType, getFileTypeLabel } from './services/fileParserService';
 import * as db from './services/firebaseService';
 
 const App: React.FC = () => {
@@ -27,6 +28,7 @@ const App: React.FC = () => {
   
   const [selectedImage, setSelectedImage] = useState<{ data: string, mimeType: string } | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [selectedDocument, setSelectedDocument] = useState<{ text: string, fileName: string, fileType: string } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -146,25 +148,37 @@ const App: React.FC = () => {
   const handleSendMessage = async () => {
     if (!userProfile) return;
     
-    if ((!inputText.trim() && !selectedImage) || isLoading || !activeSessionId) return;
+    if ((!inputText.trim() && !selectedImage && !selectedDocument) || isLoading || !activeSessionId) return;
+    
+    // Build message content: if a document is attached, prepend its content
+    let messageContent = inputText;
+    if (selectedDocument) {
+      const docPrefix = `[Attached file: ${selectedDocument.fileName}]\n\n${selectedDocument.text}\n\n`;
+      messageContent = inputText.trim() 
+        ? `${docPrefix}User's question: ${inputText}` 
+        : `${docPrefix}Please analyze this document.`;
+    }
     
     const userMsg: Message = { 
       id: crypto.randomUUID(), 
       role: 'user', 
-      content: inputText, 
+      content: messageContent, 
       timestamp: new Date(),
       imagePart: selectedImage || undefined,
-      imageUrl: imagePreview || undefined
+      imageUrl: imagePreview || undefined,
+      documentName: selectedDocument?.fileName || undefined
     };
     
     const currentSession = sessions.find(s => s.id === activeSessionId)!;
     const history = [...currentSession.messages, userMsg];
     const isFirstMessage = currentSession.messages.length === 0;
-    const newTitle = isFirstMessage ? (userMsg.content.slice(0, 30) || "Image Analysis") : currentSession.title;
+    const titleHint = selectedDocument ? selectedDocument.fileName : (userMsg.content.slice(0, 30) || "Image Analysis");
+    const newTitle = isFirstMessage ? titleHint : currentSession.title;
     
     setInputText('');
     setSelectedImage(null);
     setImagePreview(null);
+    setSelectedDocument(null);
     setIsLoading(true);
     setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, messages: history, title: newTitle } : s));
 
@@ -286,17 +300,43 @@ const App: React.FC = () => {
     );
   };
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const originalBase64 = reader.result as string;
-      const dataOnly = originalBase64.split(',')[1];
-      setSelectedImage({ data: dataOnly, mimeType: 'image/jpeg' });
-      setImagePreview(originalBase64);
-    };
-    reader.readAsDataURL(file);
+    
+    const fileType = detectFileType(file);
+    
+    if (fileType === 'image') {
+      // Handle images as before (for vision model)
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const originalBase64 = reader.result as string;
+        const dataOnly = originalBase64.split(',')[1];
+        setSelectedImage({ data: dataOnly, mimeType: file.type || 'image/jpeg' });
+        setImagePreview(originalBase64);
+        setSelectedDocument(null);
+      };
+      reader.readAsDataURL(file);
+    } else if (fileType === 'unsupported') {
+      alert(`Unsupported file type. Supported: Images, PDF, DOCX, TXT, and code files.`);
+    } else {
+      // Handle documents (PDF, DOCX, TXT, etc.)
+      try {
+        setApiStatusText("Parsing file...");
+        const parsed = await parseFile(file);
+        setSelectedDocument({ text: parsed.text, fileName: parsed.fileName, fileType: getFileTypeLabel(parsed.fileType) });
+        setSelectedImage(null);
+        setImagePreview(null);
+        setApiStatusText("File ready");
+      } catch (err) {
+        console.error("FILE_PARSE_ERROR:", err);
+        alert("Failed to parse this file. Please try a different file.");
+        setApiStatusText("Parse error");
+      }
+    }
+    
+    // Reset file input so same file can be selected again
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
@@ -445,6 +485,12 @@ const App: React.FC = () => {
               activeSession.messages.map(m => (
                 <div key={m.id} className={`flex gap-3 ${m.role === 'user' ? 'flex-row-reverse' : 'flex-row'} animate-in slide-in-from-bottom-2 duration-300`}>
                    <div className={`flex flex-col gap-2 max-w-[90%] md:max-w-[85%] ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
+                      {m.documentName && (
+                        <div className="flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-2xl px-3 py-2 mb-1">
+                          <Paperclip size={14} className="text-indigo-400" />
+                          <span className="text-xs font-bold text-zinc-300 truncate max-w-[200px]">{m.documentName}</span>
+                        </div>
+                      )}
                       {m.imageUrl && (
                         <div className="rounded-[2rem] overflow-hidden border border-zinc-800 shadow-2xl mb-1">
                            <img src={m.imageUrl} className="max-w-full h-auto max-h-[300px] object-cover" alt="User upload" />
@@ -481,11 +527,21 @@ const App: React.FC = () => {
                 <button onClick={() => { setSelectedImage(null); setImagePreview(null); }} className="absolute -top-2 -right-2 bg-red-500 text-white p-1.5 rounded-full shadow-lg hover:scale-110 transition-transform"><X size={14} /></button>
               </div>
             )}
+            {selectedDocument && (
+              <div className="relative inline-flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-2xl px-4 py-2.5 animate-in fade-in zoom-in duration-300">
+                <Paperclip size={16} className="text-indigo-400" />
+                <div className="text-sm">
+                  <div className="font-bold text-zinc-200 truncate max-w-[200px]">{selectedDocument.fileName}</div>
+                  <div className="text-[10px] text-zinc-500 uppercase font-bold">{selectedDocument.fileType}</div>
+                </div>
+                <button onClick={() => setSelectedDocument(null)} className="ml-2 text-zinc-500 hover:text-red-400 transition-colors"><X size={14} /></button>
+              </div>
+            )}
             <div className="flex items-end gap-2 bg-zinc-900/80 border border-zinc-800 rounded-[2.5rem] p-2.5 shadow-2xl focus-within:border-indigo-500/30 transition-all">
-              <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSelect} />
+              <input type="file" ref={fileInputRef} className="hidden" accept="image/*,.pdf,.docx,.doc,.txt,.md,.csv,.json,.xml,.html,.css,.js,.ts,.tsx,.jsx,.py,.java,.c,.cpp,.h,.rb,.go,.rs,.sh,.yaml,.yml,.toml,.ini,.cfg,.log,.sql,.env" onChange={handleFileSelect} />
               <button onClick={() => fileInputRef.current?.click()} className="p-3.5 text-zinc-500 hover:text-indigo-400 transition-colors"><Paperclip size={22} /></button>
               <textarea rows={1} value={inputText} onChange={e => { setInputText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder="Talk to Utsho..." className="flex-1 bg-transparent py-3.5 px-2 outline-none resize-none max-h-40 text-[15px] text-zinc-100 placeholder-zinc-600" />
-              <button onClick={handleSendMessage} disabled={isLoading} className={`p-4 rounded-full transition-all active:scale-90 shadow-xl ${ (inputText.trim() || selectedImage) && !isLoading ? 'bg-indigo-600 shadow-indigo-500/20' : 'bg-zinc-800 text-zinc-600'}`}>
+              <button onClick={handleSendMessage} disabled={isLoading} className={`p-4 rounded-full transition-all active:scale-90 shadow-xl ${ (inputText.trim() || selectedImage || selectedDocument) && !isLoading ? 'bg-indigo-600 shadow-indigo-500/20' : 'bg-zinc-800 text-zinc-600'}`}>
                  {isLoading ? <RefreshCcw size={22} className="animate-spin" /> : <Send size={22} />}
               </button>
             </div>

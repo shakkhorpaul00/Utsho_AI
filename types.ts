@@ -22,6 +22,8 @@ export interface Message {
   sources?: { title: string; uri: string }[];
   imageUrl?: string;
   imagePart?: { data: string; mimeType: string };
+  documentText?: string;
+  documentName?: string;
 }
 
 export interface ChatSession {
